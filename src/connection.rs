@@ -39,13 +39,13 @@ impl Connection {
         self.connected_server_type = Some(ServerType::Home);
     }
 
-    pub fn connect(&mut self, ip: &str, is_illegal: bool) {
-        self.path.push(ip.to_string());
-        self.target_ip = Some(ip.to_string());
-        if is_illegal {
+    pub fn connect_to(&mut self, server: &Server) {
+        self.path.push(server.ip.clone());
+        self.target_ip = Some(server.ip.clone());
+        self.connected_server_type = Some(server.server_type.clone());
+        if server.is_illegal() {
             self.is_tracing = true;
         }
-        // NOTE: connected_server_type will be updated by the ConnectCommand after it gets the server details from App.world
     }
 
     pub fn is_in_path(&self, ip: &str) -> bool {

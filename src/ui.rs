@@ -99,7 +99,8 @@ fn render_system_status(f: &mut Frame, area: Rect, app: &App, registry: &Command
         .connection
         .target_ip
         .as_ref()
-        .map(|ip| app.world.servers[ip].name.as_str())
+        .and_then(|ip| app.world.servers.get(ip))
+        .map(|server| server.name.as_str())
         .unwrap_or("None");
 
     let firewall_status = app
@@ -164,9 +165,12 @@ fn render_system_status(f: &mut Frame, area: Rect, app: &App, registry: &Command
 // Main render function
 // ============================================================================
 
-pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
-    let view_registry = ViewRegistry::new();
-
+pub fn render(
+    f: &mut Frame,
+    app: &mut App,
+    registry: &CommandRegistry,
+    view_registry: &ViewRegistry,
+) {
     let main_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -227,10 +231,34 @@ pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
     render_input(f, main_layout[3], app);
 }
 
+/// Minimal data needed to render a server on the map
+struct MapServer {
+    name: String,
+    ip: String,
+    coords: (f64, f64),
+}
+
 fn render_world_map(f: &mut Frame, area: Rect, app: &App) {
-    let servers_clone: Vec<Server> = app.world.servers.values().cloned().collect();
-    let path_clone = app.connection.path.clone();
-    let servers_map_clone = app.world.servers.clone();
+    // Extract only the data needed for rendering (avoid cloning entire Server structs)
+    let servers: Vec<MapServer> = app
+        .world
+        .servers
+        .values()
+        .map(|s| MapServer {
+            name: s.name.clone(),
+            ip: s.ip.clone(),
+            coords: s.coords,
+        })
+        .collect();
+
+    // For the path, we only need coordinates of connected servers
+    let path_coords: Vec<(f64, f64)> = app
+        .connection
+        .path
+        .iter()
+        .filter_map(|ip| app.world.servers.get(ip).map(|s| s.coords))
+        .collect();
+
     let animation_tick = app.animation_tick;
 
     let map = Canvas::default()
@@ -243,7 +271,7 @@ fn render_world_map(f: &mut Frame, area: Rect, app: &App) {
                 resolution: MapResolution::High,
             });
 
-            for server in &servers_clone {
+            for server in &servers {
                 ctx.print(server.coords.0, server.coords.1, "●".fg(Color::LightRed));
                 ctx.print(
                     server.coords.0,
@@ -264,19 +292,14 @@ fn render_world_map(f: &mut Frame, area: Rect, app: &App) {
             let current_color_idx = (animation_tick / 5) as usize % color_cycle.len();
             let animated_color = color_cycle[current_color_idx];
 
-            for i in 0..path_clone.len().saturating_sub(1) {
-                if let (Some(s1), Some(s2)) = (
-                    servers_map_clone.get(&path_clone[i]),
-                    servers_map_clone.get(&path_clone[i + 1]),
-                ) {
-                    ctx.draw(&Line {
-                        x1: s1.coords.0,
-                        y1: s1.coords.1,
-                        x2: s2.coords.0,
-                        y2: s2.coords.1,
-                        color: animated_color,
-                    });
-                }
+            for window in path_coords.windows(2) {
+                ctx.draw(&Line {
+                    x1: window[0].0,
+                    y1: window[0].1,
+                    x2: window[1].0,
+                    y2: window[1].1,
+                    color: animated_color,
+                });
             }
         });
 
@@ -356,5 +379,8 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
             .block(Block::default().borders(Borders::ALL).fg(Color::Yellow)),
         area,
     );
-    f.set_cursor_position((area.x + 1 + 2 + app.terminal.cursor_pos as u16, area.y + 1));
+    // Clamp cursor position to stay within the input area bounds
+    let cursor_x =
+        (area.x + 3 + app.terminal.cursor_pos as u16).min(area.x + area.width.saturating_sub(2));
+    f.set_cursor_position((cursor_x, area.y + 1));
 }

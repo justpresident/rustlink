@@ -38,10 +38,8 @@ impl Command for ConnectCommand {
             return CommandResult::Ok;
         };
 
-        let is_illegal = server.is_locked || server.firewall.is_some();
         let new_server_type = Some(server.server_type.clone());
-        app.connection.connect(ip, is_illegal);
-        app.connection.connected_server_type = new_server_type.clone();
+        app.connection.connect_to(server);
         app.log(format!("Connected to {}", ip));
 
         if old_server_type != new_server_type {

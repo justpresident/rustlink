@@ -17,8 +17,6 @@ pub enum CommandResult {
     Ok,
     /// Command executed but app should quit
     Quit,
-    /// Command not found (try next handler)
-    NotFound,
     /// Connection state changed, triggers command re-evaluation
     ConnectionChanged {
         old_server_type: Option<crate::model::ServerType>,
@@ -54,15 +52,15 @@ pub trait Command: Send + Sync {
         Vec::new()
     }
 
-    /// Get completions with access to tool registry
+    /// Get completions with access to tool registry.
+    /// Override this method if your command needs tool registry for completions.
     fn completions_with_tools(
         &self,
         app: &App,
         arg_index: usize,
         prefix: &str,
-        tool_registry: &ToolRegistry,
+        _tool_registry: &ToolRegistry,
     ) -> Vec<String> {
-        let _ = tool_registry;
         self.completions(app, arg_index, prefix)
     }
 }

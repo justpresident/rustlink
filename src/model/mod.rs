@@ -72,3 +72,10 @@ pub struct Server {
     pub server_type: ServerType,
     pub accounts: Option<Vec<Account>>, // Only for Bank servers
 }
+
+impl Server {
+    /// Returns true if connecting to this server triggers a trace
+    pub fn is_illegal(&self) -> bool {
+        self.is_locked || self.firewall.is_some()
+    }
+}

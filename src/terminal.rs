@@ -105,37 +105,38 @@ impl Terminal {
 
     // History methods
     pub fn history_up(&mut self) {
-        if self.command_history.is_empty() {
-            return;
-        }
-        match self.history_index {
-            None => {
-                self.history_index = Some(self.command_history.len() - 1);
-            }
-            Some(idx) if idx > 0 => {
-                self.history_index = Some(idx - 1);
-            }
-            _ => return,
-        }
-        if let Some(idx) = self.history_index {
-            self.input = self.command_history[idx].clone();
-            self.cursor_pos = self.input.len();
-        }
+        self.navigate_history(true);
     }
 
     pub fn history_down(&mut self) {
-        match self.history_index {
-            Some(idx) if idx < self.command_history.len() - 1 => {
-                self.history_index = Some(idx + 1);
-                self.input = self.command_history[idx + 1].clone();
-                self.cursor_pos = self.input.len();
-            }
-            Some(_) => {
-                self.history_index = None;
-                self.input.clear();
-                self.cursor_pos = 0;
-            }
-            None => {}
+        self.navigate_history(false);
+    }
+
+    fn navigate_history(&mut self, go_back: bool) {
+        if self.command_history.is_empty() {
+            return;
+        }
+
+        let new_index = match (self.history_index, go_back) {
+            // Going back (up) from no selection -> select last item
+            (None, true) => Some(self.command_history.len() - 1),
+            // Going back (up) from an index -> decrement if possible
+            (Some(idx), true) if idx > 0 => Some(idx - 1),
+            // Going forward (down) from an index -> increment if possible
+            (Some(idx), false) if idx < self.command_history.len() - 1 => Some(idx + 1),
+            // Going forward (down) past the end -> clear selection
+            (Some(_), false) => None,
+            // Can't go further back, or no selection and going forward
+            _ => return,
+        };
+
+        self.history_index = new_index;
+        if let Some(idx) = new_index {
+            self.input = self.command_history[idx].clone();
+            self.cursor_pos = self.input.len();
+        } else {
+            self.input.clear();
+            self.cursor_pos = 0;
         }
     }
 

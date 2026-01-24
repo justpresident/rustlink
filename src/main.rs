@@ -2,8 +2,8 @@ use crossterm::event::{self, Event, KeyCode};
 use ratatui::prelude::{CrosstermBackend, Terminal};
 use rustlink::{
     app::App,
-    commands::{CommandRegistry, CommandResult, execute_input, get_completions}, // Ensure CommandResult is imported
-    ui::render,
+    commands::{CommandRegistry, CommandResult, execute_input, get_completions},
+    ui::{ViewRegistry, render},
 };
 use std::time::Duration;
 
@@ -16,6 +16,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut app = App::new();
     let mut registry = CommandRegistry::new();
+    let view_registry = ViewRegistry::new();
     let tick_rate = Duration::from_millis(50);
 
     // Initial activation for Home server
@@ -25,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     loop {
-        terminal.draw(|f| render(f, &mut app, &registry))?;
+        terminal.draw(|f| render(f, &mut app, &registry, &view_registry))?;
 
         if event::poll(tick_rate)?
             && let Event::Key(key) = event::read()?
@@ -82,11 +83,9 @@ async fn main() -> anyhow::Result<()> {
                     app.terminal.cursor_pos = 0;
 
                     match command_result {
-                        CommandResult::Ok => {} // Do nothing special
+                        CommandResult::Ok => {}
                         CommandResult::Quit => {
-                            app.should_quit = true; // Signal app to quit
-                        }
-                        CommandResult::NotFound => { /* This case should be handled by execute_input logging an error */
+                            app.should_quit = true;
                         }
                         CommandResult::ConnectionChanged {
                             old_server_type,
