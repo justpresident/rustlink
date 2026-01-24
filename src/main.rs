@@ -32,6 +32,16 @@ pub enum ToolState {
 }
 
 #[derive(Debug, Clone)]
+pub struct Mission {
+    pub id: u32,
+    pub description: String,
+    pub target_ip: String,
+    pub target_file: String,
+    pub reward: u32,
+    pub is_complete: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct Server {
     pub name: String,
     pub ip: String,
@@ -51,10 +61,15 @@ pub struct App {
     pub last_tick: Instant,
     pub should_quit: bool,
 
-    // New State for Hacking mechanics
+    // Hacking mechanics
     pub active_tool: ToolState,
     pub target_ip: Option<String>,
     pub inventory: Vec<String>, // List of software names
+
+    // Mission/economy system
+    pub local_files: Vec<File>,
+    pub credits: u32,
+    pub missions: Vec<Mission>,
 }
 
 impl App {
@@ -82,7 +97,7 @@ impl App {
             Server {
                 name: "Global Trust Bank".into(),
                 ip: "212.43.10.5".into(),
-                coords: (80.0, 40.0),
+                coords: (139.69, 35.68), // Tokyo
                 fs: bank_fs,
                 is_locked: true,
                 password: Some("admin123".into()),
@@ -95,7 +110,7 @@ impl App {
             Server {
                 name: "Home Gateway".into(),
                 ip: "127.0.0.1".into(),
-                coords: (10.0, 25.0),
+                coords: (-0.12, 51.50), // London
                 fs: FileSystem::default(),
                 is_locked: false,
                 password: None,
@@ -108,10 +123,29 @@ impl App {
             Server {
                 name: "Public DNS".into(),
                 ip: "8.8.8.8".into(),
-                coords: (50.0, 10.0),
+                coords: (-122.08, 37.38), // Mountain View
                 fs: FileSystem::default(),
                 is_locked: false,
                 password: None,
+            },
+        );
+
+        // Setup Central Data server
+        servers.insert(
+            "172.16.0.4".into(),
+            Server {
+                name: "Central Data".into(),
+                ip: "172.16.0.4".into(),
+                coords: (-74.00, 40.71), // NYC
+                fs: FileSystem {
+                    files: vec![File {
+                        name: "research.doc".into(),
+                        size: 256,
+                        content: "Classified research data...".into(),
+                    }],
+                },
+                is_locked: true,
+                password: Some("secret456".into()),
             },
         );
 
@@ -127,6 +161,26 @@ impl App {
             active_tool: ToolState::Idle,
             target_ip: None,
             inventory: vec!["PasswordBreaker".into(), "FileManager".into()],
+            local_files: vec![],
+            credits: 500,
+            missions: vec![
+                Mission {
+                    id: 1,
+                    description: "Steal 'research.doc' from Central Data".into(),
+                    target_ip: "172.16.0.4".into(),
+                    target_file: "research.doc".into(),
+                    reward: 2000,
+                    is_complete: false,
+                },
+                Mission {
+                    id: 2,
+                    description: "Download 'accounts.dat' from Global Trust Bank".into(),
+                    target_ip: "212.43.10.5".into(),
+                    target_file: "accounts.dat".into(),
+                    reward: 5000,
+                    is_complete: false,
+                },
+            ],
         }
     }
 
@@ -166,18 +220,31 @@ impl App {
         self.is_tracing = false;
         self.trace_percentage = 0.0;
         self.active_tool = ToolState::Idle;
+        self.credits = self.credits.saturating_sub(100); // Penalty for getting traced
+    }
+
+    fn check_missions(&mut self, filename: &str) {
+        for m in self.missions.iter_mut() {
+            if !m.is_complete && m.target_file == filename {
+                m.is_complete = true;
+                self.credits += m.reward;
+                self.logs.push(format!("MISSION COMPLETE: +{}c", m.reward));
+            }
+        }
     }
 
     pub fn handle_command(&mut self) {
-        let parts: Vec<&str> = self.input.trim().split_whitespace().collect();
+        let input = self.input.trim().to_string();
+        let parts: Vec<&str> = input.split_whitespace().collect();
         if parts.is_empty() {
             return;
         }
 
         match parts[0] {
-            "help" => self
-                .logs
-                .push("Commands: connect <ip>, ls, run <tool>, disconnect, clear, exit".into()),
+            "help" => self.logs.push(
+                "Commands: connect <ip>, ls, scp <file>, crack, run <tool>, disconnect, clear, exit"
+                    .into(),
+            ),
             "clear" => self.logs.clear(),
             "connect" => {
                 if let Some(&ip) = parts.get(1) {
@@ -213,6 +280,30 @@ impl App {
                         self.logs
                             .push(format!("Running PasswordBreaker on {}...", target));
                     }
+                }
+            }
+            "scp" => {
+                if let (Some(target), Some(&fname)) = (self.target_ip.clone(), parts.get(1)) {
+                    let server = &self.servers[&target];
+                    if server.is_locked {
+                        self.logs.push("Access Denied: Server Locked".into());
+                    } else if let Some(f) = server.fs.files.iter().find(|f| f.name == fname) {
+                        self.local_files.push(f.clone());
+                        self.logs
+                            .push(format!("File '{}' downloaded successfully.", fname));
+                        self.check_missions(fname);
+                    } else {
+                        self.logs.push(format!("File '{}' not found.", fname));
+                    }
+                }
+            }
+            "crack" => {
+                if let Some(target) = &self.target_ip {
+                    self.active_tool = ToolState::Running {
+                        progress: 0.0,
+                        target_ip: target.clone(),
+                    };
+                    self.logs.push(format!("Cracking {}...", target));
                 }
             }
             "disconnect" => self.reset_connection(),
@@ -263,23 +354,28 @@ fn render(f: &mut Frame, app: &mut App) {
     let servers_map_clone = app.servers.clone();
     let map = Canvas::default()
         .block(Block::default().title(" WORLD MAP ").borders(Borders::ALL))
-        .x_bounds([0.0, 100.0])
-        .y_bounds([0.0, 50.0])
+        .x_bounds([-180.0, 180.0]) // Longitude
+        .y_bounds([-90.0, 90.0]) // Latitude
         .paint(move |ctx| {
+            // Draw world map background
+            ctx.draw(&Map {
+                color: Color::DarkGray,
+                resolution: MapResolution::High,
+            });
             // Draw all nodes
             for server in &servers_clone {
-                ctx.print(server.coords.0, server.coords.1, "■".fg(Color::DarkGray));
-                ctx.print(
-                    server.coords.0,
-                    server.coords.1 - 2.0,
-                    ratatui::prelude::Span::styled(server.name.clone(), Style::default().dim()),
-                );
+                ctx.print(server.coords.0, server.coords.1, "●".fg(Color::LightRed));
                 ctx.print(
                     server.coords.0,
                     server.coords.1 - 3.0,
+                    ratatui::prelude::Span::styled(server.name.clone(), Style::new().red()),
+                );
+                ctx.print(
+                    server.coords.0,
+                    server.coords.1 - 6.0,
                     ratatui::prelude::Span::styled(
-                        "[".to_string() + &server.ip.clone() + "]",
-                        Style::default().dim(),
+                        format!("[{}]", server.ip),
+                        Style::new().light_red().bold(),
                     ),
                 );
             }
@@ -307,14 +403,17 @@ fn render(f: &mut Frame, app: &mut App) {
         .as_ref()
         .map(|ip| app.servers[ip].name.as_str())
         .unwrap_or("None");
+    let local_file_names: Vec<&str> = app.local_files.iter().map(|f| f.name.as_str()).collect();
     let info_text = format!(
-        "Target: {}\nStatus: {}\nSoftware: {:?}",
+        "Credits: {}c\n\nTarget: {}\nStatus: {}\n\nLocal Files: {:?}\nSoftware: {:?}",
+        app.credits,
         target_name,
         if app.target_ip.is_some() {
             "CONNECTED"
         } else {
             "IDLE"
         },
+        local_file_names,
         app.inventory
     );
     f.render_widget(
@@ -326,10 +425,10 @@ fn render(f: &mut Frame, app: &mut App) {
         interaction_chunks[1],
     );
 
-    // 3. Bottom HUD (Logs + Tool Progress)
+    // 3. Bottom HUD (Logs + Missions/Tool Progress)
     let hud_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(main_layout[2]);
 
     let logs = List::new(
@@ -342,6 +441,7 @@ fn render(f: &mut Frame, app: &mut App) {
     .block(Block::default().title(" LOGS ").borders(Borders::ALL));
     f.render_widget(logs, hud_chunks[0]);
 
+    // Right panel: Tool progress or Missions
     if let ToolState::Running { progress, .. } = app.active_tool {
         let tool_gauge = Gauge::default()
             .block(
@@ -352,6 +452,21 @@ fn render(f: &mut Frame, app: &mut App) {
             .gauge_style(Style::default().fg(Color::Magenta))
             .percent(progress as u16);
         f.render_widget(tool_gauge, hud_chunks[1]);
+    } else {
+        // Show missions panel
+        let mission_items: Vec<ListItem> = app
+            .missions
+            .iter()
+            .map(|m| {
+                let status = if m.is_complete { "[DONE]" } else { "[OPEN]" };
+                ListItem::new(format!("{} {} (+{}c)", status, m.description, m.reward))
+            })
+            .collect();
+        f.render_widget(
+            List::new(mission_items)
+                .block(Block::default().title(" MISSIONS ").borders(Borders::ALL)),
+            hud_chunks[1],
+        );
     }
 
     // 4. Console
