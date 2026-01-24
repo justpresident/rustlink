@@ -10,7 +10,7 @@ pub fn handle_command(app: &mut App) {
 
     match parts[0] {
         "help" => app.logs.push(
-            "Commands: connect <ip>, ls, scp <file>, run <tool>, disconnect, clear, exit"
+            "Commands: connect <ip>, ls, scp <file>, run <tool>, inbox, read <id>, delete <id>, disconnect, clear, exit"
                 .into(),
         ),
         "clear" => app.logs.clear(),
@@ -81,6 +81,59 @@ pub fn handle_command(app: &mut App) {
                 } else {
                     app.logs.push(format!("File '{}' not found.", fname));
                 }
+            }
+        }
+        "inbox" => {
+            if app.inbox.is_empty() {
+                app.logs.push("Inbox is empty.".into());
+            } else {
+                app.logs.push("--- INBOX ---".into());
+                for mail in &app.inbox {
+                    let status = if mail.is_read { "[READ]" } else { "[NEW]" };
+                    app.logs.push(format!(
+                        "ID: {} {} From: {} Subject: {}",
+                        mail.id, status, mail.sender, mail.subject
+                    ));
+                }
+                app.logs.push("-------------".into());
+            }
+        }
+        "read" => {
+            if let Some(id_str) = parts.get(1) {
+                if let Ok(id) = id_str.parse::<u32>() {
+                    if let Some(mail) = app.inbox.iter_mut().find(|m| m.id == id) {
+                        app.logs.push(format!("--- MAIL ID: {} ---", mail.id));
+                        app.logs.push(format!("From: {}", mail.sender));
+                        app.logs.push(format!("Subject: {}", mail.subject));
+                        app.logs.push("".into());
+                        app.logs.push(mail.body.clone());
+                        app.logs.push("-------------------".into());
+                        mail.is_read = true;
+                    } else {
+                        app.logs.push(format!("Error: Mail with ID {} not found.", id));
+                    }
+                } else {
+                    app.logs.push("Error: Invalid mail ID.".into());
+                }
+            } else {
+                app.logs.push("Usage: read <mail_id>".into());
+            }
+        }
+        "delete" => {
+            if let Some(id_str) = parts.get(1) {
+                if let Ok(id) = id_str.parse::<u32>() {
+                    let initial_len = app.inbox.len();
+                    app.inbox.retain(|m| m.id != id);
+                    if app.inbox.len() < initial_len {
+                        app.logs.push(format!("Mail with ID {} deleted.", id));
+                    } else {
+                        app.logs.push(format!("Error: Mail with ID {} not found.", id));
+                    }
+                } else {
+                    app.logs.push("Error: Invalid mail ID.".into());
+                }
+            } else {
+                app.logs.push("Usage: delete <mail_id>".into());
             }
         }
         "disconnect" => app.reset_connection(),

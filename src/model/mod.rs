@@ -42,6 +42,15 @@ pub struct Mission {
 }
 
 #[derive(Debug, Clone)]
+pub struct Mail {
+    pub id: u32,
+    pub sender: String,
+    pub subject: String,
+    pub body: String,
+    pub is_read: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct Server {
     pub name: String,
     pub ip: String,

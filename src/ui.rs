@@ -44,6 +44,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let servers_clone: Vec<Server> = app.servers.values().cloned().collect();
     let path_clone = app.connection_path.clone();
     let servers_map_clone = app.servers.clone();
+    let animation_tick = app.animation_tick; // Capture animation_tick by value
+
     let map = Canvas::default()
         .block(Block::default().title(" WORLD MAP ").borders(Borders::ALL))
         .x_bounds([-180.0, 180.0]) // Longitude
@@ -72,6 +74,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 );
             }
             // Draw active connection path
+            let color_cycle = [Color::LightYellow, Color::Yellow, Color::Green, Color::Blue];
+            let current_color_idx = (animation_tick / 5) as usize % color_cycle.len();
+            let animated_color = color_cycle[current_color_idx];
+
             for i in 0..path_clone.len().saturating_sub(1) {
                 if let (Some(s1), Some(s2)) = (
                     servers_map_clone.get(&path_clone[i]),
@@ -82,7 +88,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                         y1: s1.coords.1,
                         x2: s2.coords.0,
                         y2: s2.coords.1,
-                        color: Color::Yellow,
+                        color: animated_color,
                     });
                 }
             }
@@ -112,9 +118,15 @@ pub fn render(f: &mut Frame, app: &mut App) {
     } else {
         "N/A".to_string()
     };
+    let unread_mail_count = app.inbox.iter().filter(|m| !m.is_read).count();
+    let mail_status = if unread_mail_count > 0 {
+        format!("{} NEW", unread_mail_count)
+    } else {
+        "None".to_string()
+    };
     let local_file_names: Vec<&str> = app.local_files.iter().map(|f| f.name.as_str()).collect();
     let info_text = format!(
-        "Credits: {}c\n\nTarget: {}\nStatus: {}\nFirewall: {}\n\nLocal Files: {:?}\nSoftware: {:?}",
+        "Credits: {}c\n\nTarget: {}\nStatus: {}\nFirewall: {}\nUnread Mail: {}\n\nLocal Files: {:?}\nSoftware: {:?}",
         app.credits,
         target_name,
         if app.target_ip.is_some() {
@@ -123,6 +135,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
             "IDLE"
         },
         firewall_status,
+        mail_status,
         local_file_names,
         app.inventory
     );

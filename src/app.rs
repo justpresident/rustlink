@@ -3,7 +3,7 @@ use std::{
     collections::HashMap,
     time::Instant,
 };
-use crate::model::*;
+use crate::model::{File, FileSystem, Mail, Mission, Server, ToolState, ToolType};
 
 pub struct App {
     pub servers: HashMap<String, Server>,
@@ -24,6 +24,8 @@ pub struct App {
     pub local_files: Vec<File>,
     pub credits: u32,
     pub missions: Vec<Mission>,
+    pub inbox: Vec<Mail>,
+    pub animation_tick: u64,
 }
 
 impl App {
@@ -145,6 +147,23 @@ impl App {
                     is_complete: false,
                 },
             ],
+            inbox: vec![
+                Mail {
+                    id: 1,
+                    sender: "admin@uplink.net".into(),
+                    subject: "Welcome to Uplink!".into(),
+                    body: "Welcome, Agent. Your journey into the digital underworld begins now. Good luck.".into(),
+                    is_read: false,
+                },
+                Mail {
+                    id: 2,
+                    sender: "intern@globaltrust.com".into(),
+                    subject: "Urgent: System Vulnerability".into(),
+                    body: "We've detected a critical vulnerability in our systems. Please assist immediately.".into(),
+                    is_read: false,
+                },
+            ],
+            animation_tick: 0,
         }
     }
 
@@ -190,6 +209,7 @@ impl App {
                 self.reset_connection();
             }
         }
+        self.animation_tick = self.animation_tick.wrapping_add(1);
     }
 
     pub fn reset_connection(&mut self) {
