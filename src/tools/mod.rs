@@ -25,7 +25,8 @@ pub trait Tool: Send + Sync {
 
     /// Called when the tool starts running
     fn on_start(&self, app: &mut App, target_ip: &str) {
-        app.logs.push(format!("Running {} on {}...", self.name(), target_ip));
+        app.logs
+            .push(format!("Running {} on {}...", self.name(), target_ip));
     }
 
     /// Called each tick while the tool is running
@@ -63,7 +64,10 @@ impl ToolRegistry {
 
     /// Find a tool by name
     pub fn find(&self, name: &str) -> Option<&dyn Tool> {
-        self.tools.iter().find(|t| t.name() == name).map(|b| b.as_ref())
+        self.tools
+            .iter()
+            .find(|t| t.name() == name)
+            .map(|b| b.as_ref())
     }
 
     /// Get all registered tools

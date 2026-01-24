@@ -10,7 +10,7 @@ impl Command for HelpCommand {
     }
 
     fn aliases(&self) -> &[&'static str] {
-        &["?", "h"]
+        &["?"]
     }
 
     fn description(&self) -> &'static str {

@@ -30,6 +30,12 @@ pub struct App {
     pub history_index: Option<usize>,
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl App {
     pub fn new() -> Self {
         let mut servers = HashMap::new();
@@ -173,14 +179,14 @@ impl App {
 
     pub fn on_tick(&mut self, tool_registry: &crate::tools::ToolRegistry) {
         // Handle Tool Progress
-        if let Some(ref mut active) = self.active_tool {
-            if let Some(tool) = tool_registry.find(&active.tool_name) {
-                active.progress = tool.on_tick(active.progress);
-                if active.progress >= 100.0 {
-                    let target_ip = active.target_ip.clone();
-                    tool.on_complete(self, &target_ip);
-                    self.active_tool = None;
-                }
+        if let Some(ref mut active) = self.active_tool
+            && let Some(tool) = tool_registry.find(&active.tool_name)
+        {
+            active.progress = tool.on_tick(active.progress);
+            if active.progress >= 100.0 {
+                let target_ip = active.target_ip.clone();
+                tool.on_complete(self, &target_ip);
+                self.active_tool = None;
             }
         }
 

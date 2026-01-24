@@ -9,7 +9,7 @@ impl Command for ClearCommand {
     }
 
     fn aliases(&self) -> &[&'static str] {
-        &["cls"]
+        &[]
     }
 
     fn description(&self) -> &'static str {
@@ -30,7 +30,7 @@ impl Command for ExitCommand {
     }
 
     fn aliases(&self) -> &[&'static str] {
-        &["quit", "q"]
+        &["quit"]
     }
 
     fn description(&self) -> &'static str {

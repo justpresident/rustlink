@@ -9,7 +9,7 @@ impl Command for ConnectCommand {
     }
 
     fn aliases(&self) -> &[&'static str] {
-        &["ssh", "cn"]
+        &["ssh"]
     }
 
     fn description(&self) -> &'static str {

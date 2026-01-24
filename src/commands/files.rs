@@ -9,7 +9,7 @@ impl Command for LsCommand {
     }
 
     fn aliases(&self) -> &[&'static str] {
-        &["dir", "list"]
+        &["dir"]
     }
 
     fn description(&self) -> &'static str {
@@ -21,12 +21,12 @@ impl Command for LsCommand {
             let server = &app.servers[target];
 
             // Check firewall first
-            if let Some(firewall) = &server.firewall {
-                if firewall.is_active {
-                    app.logs
-                        .push("Access Denied: Firewall active. Run FirewallBuster first.".into());
-                    return CommandResult::Ok;
-                }
+            if let Some(firewall) = &server.firewall
+                && firewall.is_active
+            {
+                app.logs
+                    .push("Access Denied: Firewall active. Run FirewallBuster first.".into());
+                return CommandResult::Ok;
             }
 
             if server.is_locked {
@@ -57,7 +57,7 @@ impl Command for ScpCommand {
     }
 
     fn aliases(&self) -> &[&'static str] {
-        &["download", "get", "cp"]
+        &["download"]
     }
 
     fn description(&self) -> &'static str {
@@ -82,11 +82,11 @@ impl Command for ScpCommand {
         let server = &app.servers[&target];
 
         // Check firewall
-        if let Some(firewall) = &server.firewall {
-            if firewall.is_active {
-                app.logs.push("Access Denied: Firewall active.".into());
-                return CommandResult::Ok;
-            }
+        if let Some(firewall) = &server.firewall
+            && firewall.is_active
+        {
+            app.logs.push("Access Denied: Firewall active.".into());
+            return CommandResult::Ok;
         }
 
         if server.is_locked {
@@ -107,17 +107,17 @@ impl Command for ScpCommand {
     }
 
     fn completions(&self, app: &App, _arg_index: usize, prefix: &str) -> Vec<String> {
-        if let Some(target) = &app.target_ip {
-            if let Some(server) = app.servers.get(target) {
-                return server
-                    .fs
-                    .files
-                    .iter()
-                    .map(|f| &f.name)
-                    .filter(|name| name.starts_with(prefix))
-                    .cloned()
-                    .collect();
-            }
+        if let Some(target) = &app.target_ip
+            && let Some(server) = app.servers.get(target)
+        {
+            return server
+                .fs
+                .files
+                .iter()
+                .map(|f| &f.name)
+                .filter(|name| name.starts_with(prefix))
+                .cloned()
+                .collect();
         }
         Vec::new()
     }

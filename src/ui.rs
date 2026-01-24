@@ -1,7 +1,5 @@
 use ratatui::{
-    prelude::{
-        Color, Constraint, Direction, Frame, Layout, Style, Stylize,
-    },
+    prelude::{Color, Constraint, Direction, Frame, Layout, Style, Stylize},
     widgets::{canvas::*, *},
 };
 
@@ -164,8 +162,8 @@ pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
         .skip(app.logs.len().saturating_sub(logs_height))
         .map(|l| ListItem::new(l.as_str()))
         .collect();
-    let logs = List::new(logs_to_show)
-        .block(Block::default().title(" LOGS ").borders(Borders::ALL));
+    let logs =
+        List::new(logs_to_show).block(Block::default().title(" LOGS ").borders(Borders::ALL));
     f.render_widget(logs, hud_chunks[0]);
 
     // Right panel: Tool progress or Missions
@@ -206,6 +204,6 @@ pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
     // Set cursor position (account for border and "> " prompt)
     f.set_cursor_position((
         input_area.x + 1 + 2 + app.cursor_pos as u16, // border + "> " + cursor
-        input_area.y + 1, // border
+        input_area.y + 1,                             // border
     ));
 }

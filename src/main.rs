@@ -2,7 +2,7 @@ use crossterm::event::{self, Event, KeyCode};
 use ratatui::prelude::{CrosstermBackend, Terminal};
 use rustlink::{
     app::App,
-    commands::{execute_input, get_completions, CommandRegistry},
+    commands::{CommandRegistry, execute_input, get_completions},
     ui::render,
 };
 use std::time::Duration;
@@ -21,69 +21,58 @@ async fn main() -> anyhow::Result<()> {
     loop {
         terminal.draw(|f| render(f, &mut app, &registry))?;
 
-        if event::poll(tick_rate)? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == event::KeyEventKind::Press {
-                    match key.code {
-                        // Quit
-                        KeyCode::Char('q')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            break;
-                        }
-                        // Ctrl+A - move to start of line
-                        KeyCode::Char('a')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            app.move_cursor_start();
-                        }
-                        // Ctrl+E - move to end of line
-                        KeyCode::Char('e')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            app.move_cursor_end();
-                        }
-                        // Ctrl+U - clear line
-                        KeyCode::Char('u')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            app.clear_line();
-                        }
-                        // Ctrl+W - delete word
-                        KeyCode::Char('w')
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                        {
-                            app.delete_word();
-                        }
-                        // Regular character input
-                        KeyCode::Char(c) => app.insert_char(c),
-                        // Backspace - delete char before cursor
-                        KeyCode::Backspace => app.delete_char(),
-                        // Delete - delete char at cursor
-                        KeyCode::Delete => app.delete_char_forward(),
-                        // Arrow keys
-                        KeyCode::Left => app.move_cursor_left(),
-                        KeyCode::Right => app.move_cursor_right(),
-                        KeyCode::Up => app.history_up(),
-                        KeyCode::Down => app.history_down(),
-                        // Home/End
-                        KeyCode::Home => app.move_cursor_start(),
-                        KeyCode::End => app.move_cursor_end(),
-                        // Tab - autocomplete
-                        KeyCode::Tab => {
-                            let completions = get_completions(&registry, &app, &app.input);
-                            app.apply_completions(completions);
-                        }
-                        // Enter - execute command
-                        KeyCode::Enter => {
-                            app.save_to_history();
-                            execute_input(&registry, &mut app);
-                            app.input.clear();
-                            app.cursor_pos = 0;
-                        }
-                        _ => {}
-                    }
+        if event::poll(tick_rate)?
+            && let Event::Key(key) = event::read()?
+            && key.kind == event::KeyEventKind::Press
+        {
+            match key.code {
+                // Quit
+                KeyCode::Char('q') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                    break;
                 }
+                // Ctrl+A - move to start of line
+                KeyCode::Char('a') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                    app.move_cursor_start();
+                }
+                // Ctrl+E - move to end of line
+                KeyCode::Char('e') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                    app.move_cursor_end();
+                }
+                // Ctrl+U - clear line
+                KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                    app.clear_line();
+                }
+                // Ctrl+W - delete word
+                KeyCode::Char('w') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                    app.delete_word();
+                }
+                // Regular character input
+                KeyCode::Char(c) => app.insert_char(c),
+                // Backspace - delete char before cursor
+                KeyCode::Backspace => app.delete_char(),
+                // Delete - delete char at cursor
+                KeyCode::Delete => app.delete_char_forward(),
+                // Arrow keys
+                KeyCode::Left => app.move_cursor_left(),
+                KeyCode::Right => app.move_cursor_right(),
+                KeyCode::Up => app.history_up(),
+                KeyCode::Down => app.history_down(),
+                // Home/End
+                KeyCode::Home => app.move_cursor_start(),
+                KeyCode::End => app.move_cursor_end(),
+                // Tab - autocomplete
+                KeyCode::Tab => {
+                    let completions = get_completions(&registry, &app, &app.input);
+                    app.apply_completions(completions);
+                }
+                // Enter - execute command
+                KeyCode::Enter => {
+                    app.save_to_history();
+                    execute_input(&registry, &mut app);
+                    app.input.clear();
+                    app.cursor_pos = 0;
+                }
+                _ => {}
             }
         }
 

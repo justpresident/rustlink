@@ -9,7 +9,7 @@ impl Command for DisconnectCommand {
     }
 
     fn aliases(&self) -> &[&'static str] {
-        &["dc", "logout"]
+        &[]
     }
 
     fn description(&self) -> &'static str {

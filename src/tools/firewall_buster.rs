@@ -30,11 +30,12 @@ impl Tool for FirewallBuster {
     }
 
     fn on_complete(&self, app: &mut App, target_ip: &str) {
-        if let Some(server) = app.servers.get_mut(target_ip) {
-            if let Some(firewall) = &mut server.firewall {
-                firewall.is_active = false;
-                app.logs.push(format!("SUCCESS: Firewall disabled on {}", target_ip));
-            }
+        if let Some(server) = app.servers.get_mut(target_ip)
+            && let Some(firewall) = &mut server.firewall
+        {
+            firewall.is_active = false;
+            app.logs
+                .push(format!("SUCCESS: Firewall disabled on {}", target_ip));
         }
     }
 }

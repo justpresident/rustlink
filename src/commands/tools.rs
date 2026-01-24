@@ -11,7 +11,7 @@ impl Command for RunCommand {
     }
 
     fn aliases(&self) -> &[&'static str] {
-        &["exec", "start"]
+        &["exec"]
     }
 
     fn description(&self) -> &'static str {
@@ -29,7 +29,8 @@ impl Command for RunCommand {
             app.logs.push("Usage: run <tool>".into());
             app.logs.push("Available tools:".into());
             for tool in tool_registry.all() {
-                app.logs.push(format!("  {} - {}", tool.name(), tool.description()));
+                app.logs
+                    .push(format!("  {} - {}", tool.name(), tool.description()));
             }
             return CommandResult::Ok;
         };
@@ -44,14 +45,16 @@ impl Command for RunCommand {
             app.logs.push(format!("Tool '{}' not found.", tool_name));
             app.logs.push("Available tools:".into());
             for t in tool_registry.all() {
-                app.logs.push(format!("  {} - {}", t.name(), t.description()));
+                app.logs
+                    .push(format!("  {} - {}", t.name(), t.description()));
             }
             return CommandResult::Ok;
         };
 
         // Check if already running a tool
         if app.active_tool.is_some() {
-            app.logs.push("A tool is already running. Wait for it to complete.".into());
+            app.logs
+                .push("A tool is already running. Wait for it to complete.".into());
             return CommandResult::Ok;
         }
 
@@ -73,7 +76,13 @@ impl Command for RunCommand {
         Vec::new()
     }
 
-    fn completions_with_tools(&self, _app: &App, _arg_index: usize, prefix: &str, tool_registry: &ToolRegistry) -> Vec<String> {
+    fn completions_with_tools(
+        &self,
+        _app: &App,
+        _arg_index: usize,
+        prefix: &str,
+        tool_registry: &ToolRegistry,
+    ) -> Vec<String> {
         tool_registry.completions(prefix)
     }
 }

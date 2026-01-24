@@ -22,10 +22,10 @@ impl Tool for PasswordBreaker {
         }
 
         // Check if firewall is blocking
-        if let Some(firewall) = &server.firewall {
-            if firewall.is_active {
-                return Err("Firewall is active. Disable it first with FirewallBuster.".into());
-            }
+        if let Some(firewall) = &server.firewall
+            && firewall.is_active
+        {
+            return Err("Firewall is active. Disable it first with FirewallBuster.".into());
         }
 
         Ok(())
@@ -39,7 +39,8 @@ impl Tool for PasswordBreaker {
     fn on_complete(&self, app: &mut App, target_ip: &str) {
         if let Some(server) = app.servers.get_mut(target_ip) {
             server.is_locked = false;
-            app.logs.push(format!("SUCCESS: Password cracked on {}", target_ip));
+            app.logs
+                .push(format!("SUCCESS: Password cracked on {}", target_ip));
         }
     }
 }
