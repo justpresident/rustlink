@@ -6,9 +6,10 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::model::{Server, ToolState};
+use crate::commands::CommandRegistry;
+use crate::model::Server;
 
-pub fn render(f: &mut Frame, app: &mut App) {
+pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
     let main_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -125,8 +126,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
         "None".to_string()
     };
     let local_file_names: Vec<&str> = app.local_files.iter().map(|f| f.name.as_str()).collect();
+    let tool_names = registry.tool_registry.names();
     let info_text = format!(
-        "Credits: {}c\n\nTarget: {}\nStatus: {}\nFirewall: {}\nUnread Mail: {}\n\nLocal Files: {:?}\nSoftware: {:?}",
+        "Credits: {}c\n\nTarget: {}\nStatus: {}\nFirewall: {}\nUnread Mail: {}\n\nLocal Files: {:?}\nTools: {:?}",
         app.credits,
         target_name,
         if app.target_ip.is_some() {
@@ -137,7 +139,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         firewall_status,
         mail_status,
         local_file_names,
-        app.inventory
+        tool_names
     );
     f.render_widget(
         Paragraph::new(info_text).block(
@@ -167,15 +169,15 @@ pub fn render(f: &mut Frame, app: &mut App) {
     f.render_widget(logs, hud_chunks[0]);
 
     // Right panel: Tool progress or Missions
-    if let ToolState::Running { progress, .. } = app.active_tool {
+    if let Some(ref active_tool) = app.active_tool {
         let tool_gauge = Gauge::default()
             .block(
                 Block::default()
-                    .title(" TOOL PROGRESS ")
+                    .title(format!(" {} ", active_tool.tool_name))
                     .borders(Borders::ALL),
             )
             .gauge_style(Style::default().fg(Color::Magenta))
-            .percent(progress as u16);
+            .percent(active_tool.progress as u16);
         f.render_widget(tool_gauge, hud_chunks[1]);
     } else {
         // Show missions panel

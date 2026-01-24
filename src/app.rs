@@ -1,5 +1,6 @@
 use crate::model::firewall::Firewall;
-use crate::model::{File, FileSystem, Mail, Mission, Server, ToolState, ToolType};
+use crate::model::{File, FileSystem, Mail, Mission, Server};
+use crate::tools::ActiveTool;
 use std::{collections::HashMap, time::Instant};
 
 pub struct App {
@@ -13,9 +14,8 @@ pub struct App {
     pub should_quit: bool,
 
     // Hacking mechanics
-    pub active_tool: ToolState,
+    pub active_tool: Option<ActiveTool>,
     pub target_ip: Option<String>,
-    pub inventory: Vec<String>, // List of software names
 
     // Mission/economy system
     pub local_files: Vec<File>,
@@ -126,9 +126,8 @@ impl App {
             input: String::new(),
             last_tick: Instant::now(),
             should_quit: false,
-            active_tool: ToolState::Idle,
+            active_tool: None,
             target_ip: None,
-            inventory: vec!["PasswordBreaker".into(), "FirewallBuster".into()],
             local_files: vec![],
             credits: 500,
             missions: vec![
@@ -172,35 +171,16 @@ impl App {
         }
     }
 
-    pub fn on_tick(&mut self) {
-        // Handle Cracking Progress
-        if let ToolState::Running {
-            ref mut progress,
-            ref target_ip,
-            ref tool_type,
-        } = self.active_tool
-        {
-            *progress += 2.5; // Speed of the tool
-            if *progress >= 100.0 {
-                match tool_type {
-                    ToolType::PasswordBreaker => {
-                        self.logs
-                            .push(format!("SUCCESS: Target {} bypassed.", target_ip));
-                        if let Some(server) = self.servers.get_mut(target_ip) {
-                            server.is_locked = false;
-                        }
-                    }
-                    ToolType::FirewallBuster => {
-                        self.logs
-                            .push(format!("SUCCESS: Firewall on {} disabled.", target_ip));
-                        if let Some(server) = self.servers.get_mut(target_ip) {
-                            if let Some(firewall) = &mut server.firewall {
-                                firewall.is_active = false;
-                            }
-                        }
-                    }
+    pub fn on_tick(&mut self, tool_registry: &crate::tools::ToolRegistry) {
+        // Handle Tool Progress
+        if let Some(ref mut active) = self.active_tool {
+            if let Some(tool) = tool_registry.find(&active.tool_name) {
+                active.progress = tool.on_tick(active.progress);
+                if active.progress >= 100.0 {
+                    let target_ip = active.target_ip.clone();
+                    tool.on_complete(self, &target_ip);
+                    self.active_tool = None;
                 }
-                self.active_tool = ToolState::Complete;
             }
         }
 
@@ -222,7 +202,7 @@ impl App {
         self.target_ip = None;
         self.is_tracing = false;
         self.trace_percentage = 0.0;
-        self.active_tool = ToolState::Idle;
+        self.active_tool = None;
         self.credits = self.credits.saturating_sub(100); // Penalty for getting traced
     }
 

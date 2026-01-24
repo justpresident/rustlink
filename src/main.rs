@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
     let tick_rate = Duration::from_millis(50);
 
     loop {
-        terminal.draw(|f| render(f, &mut app))?;
+        terminal.draw(|f| render(f, &mut app, &registry))?;
 
         if event::poll(tick_rate)? {
             if let Event::Key(key) = event::read()? {
@@ -88,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
         }
 
         if app.last_tick.elapsed() >= tick_rate {
-            app.on_tick();
+            app.on_tick(&registry.tool_registry);
             app.last_tick = std::time::Instant::now();
         }
         if app.should_quit {

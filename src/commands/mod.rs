@@ -7,6 +7,7 @@ mod misc;
 mod tools;
 
 use crate::app::App;
+use crate::tools::ToolRegistry;
 
 /// Result of executing a command
 pub enum CommandResult {
@@ -37,7 +38,7 @@ pub trait Command: Send + Sync {
     }
 
     /// Execute the command with given arguments
-    /// The registry is provided for commands that need to introspect available commands (like help)
+    /// The registry is provided for commands that need to introspect available commands/tools
     fn execute(&self, app: &mut App, args: &[&str], registry: &CommandRegistry) -> CommandResult;
 
     /// Get completions for the given argument position and prefix
@@ -45,17 +46,25 @@ pub trait Command: Send + Sync {
         let _ = (app, arg_index, prefix);
         Vec::new()
     }
+
+    /// Get completions with access to tool registry
+    fn completions_with_tools(&self, app: &App, arg_index: usize, prefix: &str, tool_registry: &ToolRegistry) -> Vec<String> {
+        let _ = tool_registry;
+        self.completions(app, arg_index, prefix)
+    }
 }
 
-/// Registry of all available commands
+/// Registry of all available commands and tools
 pub struct CommandRegistry {
     commands: Vec<Box<dyn Command>>,
+    pub tool_registry: ToolRegistry,
 }
 
 impl CommandRegistry {
     pub fn new() -> Self {
         let mut registry = Self {
             commands: Vec::new(),
+            tool_registry: ToolRegistry::new(),
         };
         registry.register_defaults();
         registry
@@ -151,7 +160,8 @@ pub fn get_completions(registry: &CommandRegistry, app: &App, input: &str) -> Ve
         if let Some(cmd) = registry.find(cmd_name) {
             let arg_index = if ends_with_space { parts.len() - 1 } else { parts.len() - 2 };
             let prefix = if ends_with_space { "" } else { parts.last().copied().unwrap_or("") };
-            cmd.completions(app, arg_index, prefix)
+            // Use completions_with_tools to allow access to tool registry
+            cmd.completions_with_tools(app, arg_index, prefix, &registry.tool_registry)
         } else {
             Vec::new()
         }

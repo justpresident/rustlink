@@ -1,7 +1,7 @@
 use super::{Command, CommandResult};
 use crate::app::App;
 use crate::commands::CommandRegistry;
-use crate::model::{ToolState, ToolType};
+use crate::tools::{ActiveTool, ToolRegistry};
 
 pub struct RunCommand;
 
@@ -22,11 +22,15 @@ impl Command for RunCommand {
         "run <tool>"
     }
 
-    fn execute(&self, app: &mut App, args: &[&str], _registry: &CommandRegistry) -> CommandResult {
+    fn execute(&self, app: &mut App, args: &[&str], registry: &CommandRegistry) -> CommandResult {
+        let tool_registry = &registry.tool_registry;
+
         let Some(&tool_name) = args.first() else {
             app.logs.push("Usage: run <tool>".into());
-            app.logs
-                .push(format!("Available tools: {}", app.inventory.join(", ")));
+            app.logs.push("Available tools:".into());
+            for tool in tool_registry.all() {
+                app.logs.push(format!("  {} - {}", tool.name(), tool.description()));
+            }
             return CommandResult::Ok;
         };
 
@@ -35,70 +39,41 @@ impl Command for RunCommand {
             return CommandResult::Ok;
         };
 
-        // Check if tool exists in inventory
-        if !app.inventory.iter().any(|t| t == tool_name) {
-            app.logs
-                .push(format!("Tool '{}' not found in inventory.", tool_name));
-            app.logs
-                .push(format!("Available tools: {}", app.inventory.join(", ")));
+        // Find the tool in the registry
+        let Some(tool) = tool_registry.find(tool_name) else {
+            app.logs.push(format!("Tool '{}' not found.", tool_name));
+            app.logs.push("Available tools:".into());
+            for t in tool_registry.all() {
+                app.logs.push(format!("  {} - {}", t.name(), t.description()));
+            }
             return CommandResult::Ok;
-        }
+        };
 
         // Check if already running a tool
-        if let ToolState::Running { .. } = app.active_tool {
-            app.logs
-                .push("A tool is already running. Wait for it to complete.".into());
+        if app.active_tool.is_some() {
+            app.logs.push("A tool is already running. Wait for it to complete.".into());
             return CommandResult::Ok;
         }
 
-        match tool_name {
-            "PasswordBreaker" => {
-                let server = &app.servers[&target];
-                if !server.is_locked {
-                    app.logs
-                        .push("Server is not locked. No need for PasswordBreaker.".into());
-                    return CommandResult::Ok;
-                }
-                app.active_tool = ToolState::Running {
-                    progress: 0.0,
-                    target_ip: target.clone(),
-                    tool_type: ToolType::PasswordBreaker,
-                };
-                app.logs
-                    .push(format!("Running PasswordBreaker on {}...", target));
-            }
-            "FirewallBuster" => {
-                let server = &app.servers[&target];
-                if let Some(firewall) = &server.firewall {
-                    if !firewall.is_active {
-                        app.logs.push("Firewall is already disabled.".into());
-                        return CommandResult::Ok;
-                    }
-                    app.active_tool = ToolState::Running {
-                        progress: 0.0,
-                        target_ip: target.clone(),
-                        tool_type: ToolType::FirewallBuster,
-                    };
-                    app.logs
-                        .push(format!("Running FirewallBuster on {}...", target));
-                } else {
-                    app.logs.push("No firewall detected on target.".into());
-                }
-            }
-            _ => {
-                app.logs
-                    .push(format!("Tool '{}' is not implemented yet.", tool_name));
-            }
+        // Check if tool can run on this target
+        if let Err(msg) = tool.can_run(app, &target) {
+            app.logs.push(msg);
+            return CommandResult::Ok;
         }
+
+        // Start the tool
+        tool.on_start(app, &target);
+        app.active_tool = Some(ActiveTool::new(tool_name, &target));
 
         CommandResult::Ok
     }
 
-    fn completions(&self, app: &App, _arg_index: usize, prefix: &str) -> Vec<String> {
-        app.inventory
-            .iter()
-            .filter(|tool| tool.starts_with(prefix))
-            .cloned()
-            .collect()
+    fn completions(&self, _app: &App, _arg_index: usize, _prefix: &str) -> Vec<String> {
+        // Basic completions without tool registry access
+        Vec::new()
+    }
+
+    fn completions_with_tools(&self, _app: &App, _arg_index: usize, prefix: &str, tool_registry: &ToolRegistry) -> Vec<String> {
+        tool_registry.completions(prefix)
     }
 }

@@ -14,23 +14,6 @@ pub struct FileSystem {
     pub files: Vec<File>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum ToolType {
-    PasswordBreaker,
-    FirewallBuster,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ToolState {
-    Idle,
-    Running {
-        progress: f64,
-        target_ip: String,
-        tool_type: ToolType,
-    },
-    Complete,
-}
-
 #[derive(Debug, Clone)]
 pub struct Mission {
     pub id: u32,
