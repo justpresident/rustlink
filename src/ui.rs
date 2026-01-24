@@ -156,14 +156,28 @@ pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
 
     // Calculate how many lines fit in the logs area (height - 2 for borders)
     let logs_height = hud_chunks[0].height.saturating_sub(2) as usize;
-    let logs_to_show: Vec<ListItem> = app
-        .logs
+    // Clamp scroll to valid range
+    let max_scroll = app.logs.len().saturating_sub(logs_height);
+    if app.log_scroll > max_scroll {
+        app.log_scroll = max_scroll;
+    }
+    // Calculate the range of logs to show based on scroll position
+    let end_index = app.logs.len().saturating_sub(app.log_scroll);
+    let start_index = end_index.saturating_sub(logs_height);
+    let logs_to_show: Vec<ListItem> = app.logs[start_index..end_index]
         .iter()
-        .skip(app.logs.len().saturating_sub(logs_height))
         .map(|l| ListItem::new(l.as_str()))
         .collect();
-    let logs =
-        List::new(logs_to_show).block(Block::default().title(" LOGS ").borders(Borders::ALL));
+    let scroll_indicator = if app.log_scroll > 0 {
+        format!(" LOGS [+{}] ", app.log_scroll)
+    } else {
+        " LOGS ".to_string()
+    };
+    let logs = List::new(logs_to_show).block(
+        Block::default()
+            .title(scroll_indicator)
+            .borders(Borders::ALL),
+    );
     f.render_widget(logs, hud_chunks[0]);
 
     // Right panel: Tool progress or Missions

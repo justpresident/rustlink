@@ -28,6 +28,9 @@ pub struct App {
     pub cursor_pos: usize,
     pub command_history: Vec<String>,
     pub history_index: Option<usize>,
+
+    // Log scrolling
+    pub log_scroll: usize,
 }
 
 impl Default for App {
@@ -174,6 +177,7 @@ impl App {
             cursor_pos: 0,
             command_history: Vec::new(),
             history_index: None,
+            log_scroll: 0,
         }
     }
 
@@ -344,6 +348,14 @@ impl App {
             self.cursor_pos -= 1;
             self.input.remove(self.cursor_pos);
         }
+    }
+
+    pub fn scroll_logs_up(&mut self, amount: usize) {
+        self.log_scroll = self.log_scroll.saturating_add(amount);
+    }
+
+    pub fn scroll_logs_down(&mut self, amount: usize) {
+        self.log_scroll = self.log_scroll.saturating_sub(amount);
     }
 
     pub fn history_up(&mut self) {

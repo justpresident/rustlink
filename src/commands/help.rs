@@ -64,12 +64,14 @@ impl Command for HelpKeysCommand {
     fn execute(&self, app: &mut App, _args: &[&str], _registry: &CommandRegistry) -> CommandResult {
         app.logs.push("".into());
         app.logs.push("Keyboard shortcuts:".into());
-        app.logs.push("  Tab       - Autocomplete".into());
-        app.logs.push("  Up/Down   - Command history".into());
-        app.logs.push("  Ctrl+A/E  - Start/End of line".into());
-        app.logs.push("  Ctrl+U    - Clear line".into());
-        app.logs.push("  Ctrl+W    - Delete word".into());
-        app.logs.push("  Ctrl+Q    - Quit".into());
+        app.logs.push("  Tab              - Autocomplete".into());
+        app.logs.push("  Up/Down          - log history".into());
+        app.logs.push("  PageUp/PageDown  - command history".into());
+        app.logs
+            .push("  Ctrl+A/E         - Start/End of line".into());
+        app.logs.push("  Ctrl+U           - Clear line".into());
+        app.logs.push("  Ctrl+W           - Delete word".into());
+        app.logs.push("  Ctrl+Q           - Quit".into());
         CommandResult::Ok
     }
 }

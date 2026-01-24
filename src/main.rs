@@ -55,11 +55,14 @@ async fn main() -> anyhow::Result<()> {
                 // Arrow keys
                 KeyCode::Left => app.move_cursor_left(),
                 KeyCode::Right => app.move_cursor_right(),
-                KeyCode::Up => app.history_up(),
-                KeyCode::Down => app.history_down(),
+                KeyCode::Up => app.scroll_logs_up(2),
+                KeyCode::Down => app.scroll_logs_down(2),
                 // Home/End
                 KeyCode::Home => app.move_cursor_start(),
                 KeyCode::End => app.move_cursor_end(),
+                // Page Up/Down
+                KeyCode::PageUp => app.history_up(),
+                KeyCode::PageDown => app.history_down(),
                 // Tab - autocomplete
                 KeyCode::Tab => {
                     let completions = get_completions(&registry, &app, &app.input);
