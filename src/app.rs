@@ -1,9 +1,6 @@
 use crate::model::firewall::Firewall;
-use std::{
-    collections::HashMap,
-    time::Instant,
-};
 use crate::model::{File, FileSystem, Mail, Mission, Server, ToolState, ToolType};
+use std::{collections::HashMap, time::Instant};
 
 pub struct App {
     pub servers: HashMap<String, Server>,
@@ -131,7 +128,7 @@ impl App {
             should_quit: false,
             active_tool: ToolState::Idle,
             target_ip: None,
-            inventory: vec!["PasswordBreaker".into(), "FileManager".into(), "FirewallBuster".into()],
+            inventory: vec!["PasswordBreaker".into(), "FirewallBuster".into()],
             local_files: vec![],
             credits: 500,
             missions: vec![
@@ -342,90 +339,26 @@ impl App {
         self.history_index = None;
     }
 
-    pub fn autocomplete(&mut self) {
-        let parts: Vec<&str> = self.input.split_whitespace().collect();
-        let input_ends_with_space = self.input.ends_with(' ');
-
-        let completions: Vec<String> = if parts.is_empty() || (parts.len() == 1 && !input_ends_with_space) {
-            // Complete command
-            let prefix = parts.first().map(|s| *s).unwrap_or("");
-            self.get_command_completions(prefix)
-        } else {
-            // Complete argument based on command
-            let cmd = parts[0];
-            let arg_prefix = if input_ends_with_space { "" } else { parts.last().map(|s| *s).unwrap_or("") };
-            self.get_argument_completions(cmd, arg_prefix)
-        };
+    /// Apply completions from the command registry
+    pub fn apply_completions(&mut self, completions: Vec<String>) {
+        if completions.is_empty() {
+            return;
+        }
 
         if completions.len() == 1 {
             // Single match - complete it
-            self.apply_completion(&completions[0]);
-        } else if completions.len() > 1 {
-            // Multiple matches - show them
-            self.logs.push(format!("Completions: {}", completions.join(" ")));
-            // Find common prefix and apply it
+            self.apply_single_completion(&completions[0]);
+        } else {
+            // Multiple matches - show them and apply common prefix
+            self.logs
+                .push(format!("Completions: {}", completions.join(" ")));
             if let Some(common) = Self::common_prefix(&completions) {
-                self.apply_completion(&common);
+                self.apply_single_completion(&common);
             }
         }
     }
 
-    fn get_command_completions(&self, prefix: &str) -> Vec<String> {
-        let commands = ["help", "connect", "ls", "scp", "run", "inbox", "read", "delete", "disconnect", "clear", "exit"];
-        commands
-            .iter()
-            .filter(|cmd| cmd.starts_with(prefix))
-            .map(|s| s.to_string())
-            .collect()
-    }
-
-    fn get_argument_completions(&self, cmd: &str, prefix: &str) -> Vec<String> {
-        match cmd {
-            "connect" => {
-                // Complete IP addresses
-                self.servers
-                    .keys()
-                    .filter(|ip| ip.starts_with(prefix))
-                    .cloned()
-                    .collect()
-            }
-            "run" => {
-                // Complete tool names
-                self.inventory
-                    .iter()
-                    .filter(|tool| tool.starts_with(prefix))
-                    .cloned()
-                    .collect()
-            }
-            "scp" => {
-                // Complete filenames from current target
-                if let Some(target) = &self.target_ip {
-                    if let Some(server) = self.servers.get(target) {
-                        return server
-                            .fs
-                            .files
-                            .iter()
-                            .map(|f| &f.name)
-                            .filter(|name| name.starts_with(prefix))
-                            .cloned()
-                            .collect();
-                    }
-                }
-                Vec::new()
-            }
-            "read" | "delete" => {
-                // Complete mail IDs
-                self.inbox
-                    .iter()
-                    .map(|m| m.id.to_string())
-                    .filter(|id| id.starts_with(prefix))
-                    .collect()
-            }
-            _ => Vec::new(),
-        }
-    }
-
-    fn apply_completion(&mut self, completion: &str) {
+    fn apply_single_completion(&mut self, completion: &str) {
         let parts: Vec<&str> = self.input.split_whitespace().collect();
         let input_ends_with_space = self.input.ends_with(' ');
 
@@ -434,13 +367,12 @@ impl App {
             self.input = completion.to_string() + " ";
         } else {
             // Completing argument - rebuild input
-            let mut new_input: Vec<&str> = parts[..parts.len() - 1].to_vec();
-            if !input_ends_with_space {
-                // Replace last partial arg
+            let base_parts: Vec<&str> = if input_ends_with_space {
+                parts.clone()
             } else {
-                new_input = parts.to_vec();
-            }
-            self.input = new_input.join(" ");
+                parts[..parts.len() - 1].to_vec()
+            };
+            self.input = base_parts.join(" ");
             if !self.input.is_empty() {
                 self.input.push(' ');
             }
@@ -465,7 +397,14 @@ impl App {
                 .min(prefix_len);
         }
         if prefix_len > 0 {
-            Some(first[..first.char_indices().nth(prefix_len).map(|(i, _)| i).unwrap_or(first.len())].to_string())
+            Some(
+                first[..first
+                    .char_indices()
+                    .nth(prefix_len)
+                    .map(|(i, _)| i)
+                    .unwrap_or(first.len())]
+                    .to_string(),
+            )
         } else {
             None
         }

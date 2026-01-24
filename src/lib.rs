@@ -1,4 +1,4 @@
 pub mod app;
-pub mod command;
+pub mod commands;
 pub mod model;
 pub mod ui;

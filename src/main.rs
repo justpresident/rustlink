@@ -2,7 +2,7 @@ use crossterm::event::{self, Event, KeyCode};
 use ratatui::prelude::{CrosstermBackend, Terminal};
 use rustlink::{
     app::App,
-    command::handle_command,
+    commands::{execute_input, get_completions, CommandRegistry},
     ui::render,
 };
 use std::time::Duration;
@@ -15,6 +15,7 @@ async fn main() -> anyhow::Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
 
     let mut app = App::new();
+    let registry = CommandRegistry::new();
     let tick_rate = Duration::from_millis(50);
 
     loop {
@@ -69,11 +70,15 @@ async fn main() -> anyhow::Result<()> {
                         KeyCode::Home => app.move_cursor_start(),
                         KeyCode::End => app.move_cursor_end(),
                         // Tab - autocomplete
-                        KeyCode::Tab => app.autocomplete(),
+                        KeyCode::Tab => {
+                            let completions = get_completions(&registry, &app, &app.input);
+                            app.apply_completions(completions);
+                        }
                         // Enter - execute command
                         KeyCode::Enter => {
                             app.save_to_history();
-                            handle_command(&mut app);
+                            execute_input(&registry, &mut app);
+                            app.input.clear();
                             app.cursor_pos = 0;
                         }
                         _ => {}
