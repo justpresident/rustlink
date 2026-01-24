@@ -1,4 +1,4 @@
-use crate::model::Server;
+use crate::model::{Server, ServerType};
 use crate::tools::ActiveTool;
 use std::collections::HashMap;
 
@@ -9,6 +9,7 @@ pub struct Connection {
     pub trace_percentage: f64,
     pub is_tracing: bool,
     pub active_tool: Option<ActiveTool>,
+    pub connected_server_type: Option<ServerType>,
 }
 
 impl Default for Connection {
@@ -25,6 +26,7 @@ impl Connection {
             trace_percentage: 0.0,
             is_tracing: false,
             active_tool: None,
+            connected_server_type: Some(ServerType::Home),
         }
     }
 
@@ -34,6 +36,7 @@ impl Connection {
         self.is_tracing = false;
         self.trace_percentage = 0.0;
         self.active_tool = None;
+        self.connected_server_type = Some(ServerType::Home);
     }
 
     pub fn connect(&mut self, ip: &str, is_illegal: bool) {
@@ -42,6 +45,7 @@ impl Connection {
         if is_illegal {
             self.is_tracing = true;
         }
+        // NOTE: connected_server_type will be updated by the ConnectCommand after it gets the server details from App.world
     }
 
     pub fn is_in_path(&self, ip: &str) -> bool {

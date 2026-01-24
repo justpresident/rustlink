@@ -1,5 +1,5 @@
 use crate::model::firewall::Firewall;
-use crate::model::{File, FileSystem, Server};
+use crate::model::{Account, File, FileSystem, Server, ServerType};
 use std::collections::HashMap;
 
 /// Game world containing all servers
@@ -46,6 +46,19 @@ impl GameWorld {
                     is_active: true,
                     strength: 80,
                 }),
+                server_type: ServerType::Bank,
+                accounts: Some(vec![
+                    Account {
+                        account_number: "1000-0001".into(),
+                        balance: 15000,
+                        owner: "Player Account".into(),
+                    },
+                    Account {
+                        account_number: "1000-0002".into(),
+                        balance: 50000,
+                        owner: "Evil Corp".into(),
+                    },
+                ]),
             },
         );
 
@@ -60,6 +73,8 @@ impl GameWorld {
                 is_locked: false,
                 password: None,
                 firewall: None,
+                server_type: ServerType::Home,
+                accounts: None,
             },
         );
 
@@ -74,6 +89,8 @@ impl GameWorld {
                 is_locked: false,
                 password: None,
                 firewall: None,
+                server_type: ServerType::PublicDNS,
+                accounts: None,
             },
         );
 
@@ -97,6 +114,8 @@ impl GameWorld {
                     is_active: true,
                     strength: 50,
                 }),
+                server_type: ServerType::Data,
+                accounts: None,
             },
         );
 

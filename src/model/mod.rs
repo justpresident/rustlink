@@ -33,6 +33,33 @@ pub struct Mail {
     pub is_read: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ServerType {
+    Home,
+    PublicDNS,
+    Bank,
+    Data,
+    // Add more as needed
+}
+
+impl ServerType {
+    pub fn associated_commands(&self) -> &'static [&'static str] {
+        match self {
+            ServerType::Home => &[],      // Example: Home might have basic file ops
+            ServerType::PublicDNS => &[], // Public DNS might have no special commands
+            ServerType::Bank => &["account_info", "transfer"], // Bank has file ops and bank commands
+            ServerType::Data => &[],                           // Data servers have file ops
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Account {
+    pub account_number: String,
+    pub balance: i32, // Can be negative for debts
+    pub owner: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Server {
     pub name: String,
@@ -42,4 +69,6 @@ pub struct Server {
     pub is_locked: bool,
     pub password: Option<String>,
     pub firewall: Option<Firewall>,
+    pub server_type: ServerType,
+    pub accounts: Option<Vec<Account>>, // Only for Bank servers
 }

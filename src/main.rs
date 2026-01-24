@@ -2,7 +2,7 @@ use crossterm::event::{self, Event, KeyCode};
 use ratatui::prelude::{CrosstermBackend, Terminal};
 use rustlink::{
     app::App,
-    commands::{CommandRegistry, execute_input, get_completions},
+    commands::{CommandRegistry, CommandResult, execute_input, get_completions}, // Ensure CommandResult is imported
     ui::render,
 };
 use std::time::Duration;
@@ -15,8 +15,14 @@ async fn main() -> anyhow::Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
 
     let mut app = App::new();
-    let registry = CommandRegistry::new();
+    let mut registry = CommandRegistry::new();
     let tick_rate = Duration::from_millis(50);
+
+    // Initial activation for Home server
+    let initial_server_type = app.connection.connected_server_type.clone();
+    if let Some(st) = initial_server_type {
+        registry.activate_commands(st.associated_commands());
+    }
 
     loop {
         terminal.draw(|f| render(f, &mut app, &registry))?;
@@ -71,9 +77,42 @@ async fn main() -> anyhow::Result<()> {
                 // Enter - execute command
                 KeyCode::Enter => {
                     app.terminal.save_to_history();
-                    execute_input(&registry, &mut app);
+                    let command_result = execute_input(&mut registry, &mut app); // Capture the result
                     app.terminal.input.clear();
                     app.terminal.cursor_pos = 0;
+
+                    match command_result {
+                        CommandResult::Ok => {} // Do nothing special
+                        CommandResult::Quit => {
+                            app.should_quit = true; // Signal app to quit
+                        }
+                        CommandResult::NotFound => { /* This case should be handled by execute_input logging an error */
+                        }
+                        CommandResult::ConnectionChanged {
+                            old_server_type,
+                            new_server_type,
+                        } => {
+                            // Deactivate commands for the old server type
+                            if let Some(old_type) = old_server_type {
+                                let commands_to_deactivate: &[&str] =
+                                    old_type.associated_commands();
+                                registry.deactivate_commands(commands_to_deactivate);
+                            }
+
+                            // Activate commands for the new server type
+                            if let Some(new_type) = new_server_type {
+                                let commands_to_activate: &[&str] = new_type.associated_commands();
+                                registry.activate_commands(commands_to_activate);
+                                app.log(format!(
+                                    "Commands available on the server: {:?}",
+                                    commands_to_activate
+                                ));
+                            } else {
+                                // If disconnected to nowhere, clear all context-specific commands
+                                // For now, the `disconnect` command returning `Home` and `connect` handling this is sufficient.
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }

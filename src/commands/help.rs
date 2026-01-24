@@ -22,11 +22,11 @@ impl Command for HelpCommand {
 
         // Dynamically generate help from all registered commands
         let mut max_usage_len = 0;
-        for cmd in registry.all() {
+        for cmd in registry.all_active() {
             max_usage_len = max_usage_len.max(cmd.usage().len());
         }
 
-        for cmd in registry.all() {
+        for cmd in registry.all_active() {
             let usage = cmd.usage();
             let padding = " ".repeat(max_usage_len - usage.len() + 2);
             let aliases = cmd.aliases();

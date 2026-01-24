@@ -21,24 +21,37 @@ impl Command for ConnectCommand {
     }
 
     fn execute(&self, app: &mut App, args: &[&str], _registry: &CommandRegistry) -> CommandResult {
-        if let Some(&ip) = args.first() {
-            // Check if already in connection path
-            if app.connection.is_in_path(ip) {
-                app.log(format!("Error: Already connected through {}", ip));
-                return CommandResult::Ok;
-            }
+        let old_server_type = app.connection.connected_server_type.clone();
 
-            if let Some(server) = app.world.get(ip) {
-                let is_illegal = server.is_locked || server.firewall.is_some();
-                app.connection.connect(ip, is_illegal);
-                app.log(format!("Connected to {}", ip));
-            } else {
-                app.log(format!("Error: Unknown IP {}", ip));
+        let Some(&ip) = args.first() else {
+            app.log("Usage: connect <ip>");
+            return CommandResult::Ok;
+        };
+
+        if app.connection.is_in_path(ip) {
+            app.log(format!("Error: Already connected through {}", ip));
+            return CommandResult::Ok;
+        }
+
+        let Some(server) = app.world.get(ip) else {
+            app.log(format!("Error: Unknown IP {}", ip));
+            return CommandResult::Ok;
+        };
+
+        let is_illegal = server.is_locked || server.firewall.is_some();
+        let new_server_type = Some(server.server_type.clone());
+        app.connection.connect(ip, is_illegal);
+        app.connection.connected_server_type = new_server_type.clone();
+        app.log(format!("Connected to {}", ip));
+
+        if old_server_type != new_server_type {
+            CommandResult::ConnectionChanged {
+                old_server_type,
+                new_server_type,
             }
         } else {
-            app.log("Usage: connect <ip>");
+            CommandResult::Ok
         }
-        CommandResult::Ok
     }
 
     fn completions(&self, app: &App, _arg_index: usize, prefix: &str) -> Vec<String> {
