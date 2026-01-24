@@ -95,9 +95,26 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .as_ref()
         .map(|ip| app.servers[ip].name.as_str())
         .unwrap_or("None");
+    let firewall_status = if let Some(ip) = &app.target_ip {
+        if let Some(server) = app.servers.get(ip) {
+            if let Some(firewall) = &server.firewall {
+                if firewall.is_active {
+                    format!("ACTIVE ({})", firewall.strength)
+                } else {
+                    "DISABLED".to_string()
+                }
+            } else {
+                "N/A".to_string()
+            }
+        } else {
+            "N/A".to_string()
+        }
+    } else {
+        "N/A".to_string()
+    };
     let local_file_names: Vec<&str> = app.local_files.iter().map(|f| f.name.as_str()).collect();
     let info_text = format!(
-        "Credits: {}c\n\nTarget: {}\nStatus: {}\n\nLocal Files: {:?}\nSoftware: {:?}",
+        "Credits: {}c\n\nTarget: {}\nStatus: {}\nFirewall: {}\n\nLocal Files: {:?}\nSoftware: {:?}",
         app.credits,
         target_name,
         if app.target_ip.is_some() {
@@ -105,6 +122,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         } else {
             "IDLE"
         },
+        firewall_status,
         local_file_names,
         app.inventory
     );

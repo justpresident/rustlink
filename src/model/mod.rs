@@ -1,4 +1,6 @@
+pub mod firewall;
 
+use crate::model::firewall::Firewall;
 
 #[derive(Debug, Clone)]
 pub struct File {
@@ -13,9 +15,19 @@ pub struct FileSystem {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum ToolType {
+    PasswordBreaker,
+    FirewallBuster,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum ToolState {
     Idle,
-    Running { progress: f64, target_ip: String },
+    Running {
+        progress: f64,
+        target_ip: String,
+        tool_type: ToolType,
+    },
     Complete,
 }
 
@@ -37,4 +49,5 @@ pub struct Server {
     pub fs: FileSystem,
     pub is_locked: bool,
     pub password: Option<String>,
+    pub firewall: Option<Firewall>,
 }

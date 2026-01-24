@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::model::ToolState;
+use crate::model::{ToolState, ToolType};
 
 pub fn handle_command(app: &mut App) {
     let input = app.input.trim().to_string();
@@ -10,7 +10,7 @@ pub fn handle_command(app: &mut App) {
 
     match parts[0] {
         "help" => app.logs.push(
-            "Commands: connect <ip>, ls, scp <file>, crack, run <tool>, disconnect, clear, exit"
+            "Commands: connect <ip>, ls, scp <file>, run <tool>, disconnect, clear, exit"
                 .into(),
         ),
         "clear" => app.logs.clear(),
@@ -40,13 +40,31 @@ pub fn handle_command(app: &mut App) {
         }
         "run" => {
             if let (Some(tool), Some(target)) = (parts.get(1), &app.target_ip) {
-                if *tool == "PasswordBreaker" {
-                    app.active_tool = ToolState::Running {
-                        progress: 0.0,
-                        target_ip: target.clone(),
-                    };
-                    app.logs
-                        .push(format!("Running PasswordBreaker on {}...", target));
+                match *tool {
+                    "PasswordBreaker" => {
+                        app.active_tool = ToolState::Running {
+                            progress: 0.0,
+                            target_ip: target.clone(),
+                            tool_type: ToolType::PasswordBreaker,
+                        };
+                        app.logs
+                            .push(format!("Running PasswordBreaker on {}...", target));
+                    }
+                    "FirewallBuster" => {
+                        let server = &app.servers[target];
+                        if server.firewall.is_some() {
+                            app.active_tool = ToolState::Running {
+                                progress: 0.0,
+                                target_ip: target.clone(),
+                                tool_type: ToolType::FirewallBuster,
+                            };
+                            app.logs
+                                .push(format!("Running FirewallBuster on {}...", target));
+                        } else {
+                            app.logs.push("No firewall detected on target.".into());
+                        }
+                    }
+                    _ => app.logs.push(format!("Unknown tool: {}", tool)),
                 }
             }
         }
@@ -65,18 +83,10 @@ pub fn handle_command(app: &mut App) {
                 }
             }
         }
-        "crack" => {
-            if let Some(target) = &app.target_ip {
-                app.active_tool = ToolState::Running {
-                    progress: 0.0,
-                    target_ip: target.clone(),
-                };
-                app.logs.push(format!("Cracking {}...", target));
-            }
-        }
         "disconnect" => app.reset_connection(),
         "exit" => app.should_quit = true,
         _ => app.logs.push(format!("Unknown command: {}", parts[0])),
     }
     app.input.clear();
 }
+

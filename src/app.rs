@@ -1,3 +1,4 @@
+use crate::model::firewall::Firewall;
 use std::{
     collections::HashMap,
     time::Instant,
@@ -54,6 +55,10 @@ impl App {
                 fs: bank_fs,
                 is_locked: true,
                 password: Some("admin123".into()),
+                firewall: Some(Firewall {
+                    is_active: true,
+                    strength: 80,
+                }),
             },
         );
 
@@ -67,6 +72,7 @@ impl App {
                 fs: FileSystem::default(),
                 is_locked: false,
                 password: None,
+                firewall: None,
             },
         );
 
@@ -80,6 +86,7 @@ impl App {
                 fs: FileSystem::default(),
                 is_locked: false,
                 password: None,
+                firewall: None,
             },
         );
 
@@ -99,6 +106,10 @@ impl App {
                 },
                 is_locked: true,
                 password: Some("secret456".into()),
+                firewall: Some(Firewall {
+                    is_active: true,
+                    strength: 50,
+                }),
             },
         );
 
@@ -113,7 +124,7 @@ impl App {
             should_quit: false,
             active_tool: ToolState::Idle,
             target_ip: None,
-            inventory: vec!["PasswordBreaker".into(), "FileManager".into()],
+            inventory: vec!["PasswordBreaker".into(), "FileManager".into(), "FirewallBuster".into()],
             local_files: vec![],
             credits: 500,
             missions: vec![
@@ -142,14 +153,28 @@ impl App {
         if let ToolState::Running {
             ref mut progress,
             ref target_ip,
+            ref tool_type,
         } = self.active_tool
         {
             *progress += 2.5; // Speed of the tool
             if *progress >= 100.0 {
-                self.logs
-                    .push(format!("SUCCESS: Target {} bypassed.", target_ip));
-                if let Some(server) = self.servers.get_mut(target_ip) {
-                    server.is_locked = false;
+                match tool_type {
+                    ToolType::PasswordBreaker => {
+                        self.logs
+                            .push(format!("SUCCESS: Target {} bypassed.", target_ip));
+                        if let Some(server) = self.servers.get_mut(target_ip) {
+                            server.is_locked = false;
+                        }
+                    }
+                    ToolType::FirewallBuster => {
+                        self.logs
+                            .push(format!("SUCCESS: Firewall on {} disabled.", target_ip));
+                        if let Some(server) = self.servers.get_mut(target_ip) {
+                            if let Some(firewall) = &mut server.firewall {
+                                firewall.is_active = false;
+                            }
+                        }
+                    }
                 }
                 self.active_tool = ToolState::Complete;
             }
