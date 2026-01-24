@@ -79,9 +79,7 @@ impl CommandRegistry {
         self.register(Box::new(files::LsCommand));
         self.register(Box::new(files::ScpCommand));
         self.register(Box::new(tools::RunCommand));
-        self.register(Box::new(mail::InboxCommand));
-        self.register(Box::new(mail::ReadMailCommand));
-        self.register(Box::new(mail::DeleteMailCommand));
+        self.register(Box::new(mail::MailCommand));
         self.register(Box::new(misc::ExitCommand));
     }
 

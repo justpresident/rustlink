@@ -1,22 +1,10 @@
 use super::{Command, CommandResult};
 use crate::{app::App, commands::CommandRegistry};
 
-pub struct InboxCommand;
+pub struct MailCommand;
 
-impl Command for InboxCommand {
-    fn name(&self) -> &'static str {
-        "inbox"
-    }
-
-    fn aliases(&self) -> &[&'static str] {
-        &["mail", "messages"]
-    }
-
-    fn description(&self) -> &'static str {
-        "Show mail inbox"
-    }
-
-    fn execute(&self, app: &mut App, _args: &[&str], _registry: &CommandRegistry) -> CommandResult {
+impl MailCommand {
+    fn show_inbox(&self, app: &mut App) {
         if app.inbox.is_empty() {
             app.logs.push("Inbox is empty.".into());
         } else {
@@ -34,38 +22,17 @@ impl Command for InboxCommand {
                 app.logs.push(format!("{} unread message(s)", unread));
             }
         }
-        CommandResult::Ok
-    }
-}
-
-pub struct ReadMailCommand;
-
-impl Command for ReadMailCommand {
-    fn name(&self) -> &'static str {
-        "read"
     }
 
-    fn aliases(&self) -> &[&'static str] {
-        &[]
-    }
-
-    fn description(&self) -> &'static str {
-        "Read a mail message"
-    }
-
-    fn usage(&self) -> &'static str {
-        "read <id>"
-    }
-
-    fn execute(&self, app: &mut App, args: &[&str], _registry: &CommandRegistry) -> CommandResult {
+    fn read_mail(&self, app: &mut App, args: &[&str]) {
         let Some(&id_str) = args.first() else {
-            app.logs.push("Usage: read <mail_id>".into());
-            return CommandResult::Ok;
+            app.logs.push("Usage: mail read <mail_id>".into());
+            return;
         };
 
         let Ok(id) = id_str.parse::<u32>() else {
             app.logs.push("Error: Invalid mail ID.".into());
-            return CommandResult::Ok;
+            return;
         };
 
         if let Some(mail) = app.inbox.iter_mut().find(|m| m.id == id) {
@@ -73,7 +40,6 @@ impl Command for ReadMailCommand {
             app.logs.push(format!("From: {}", mail.sender));
             app.logs.push(format!("Subject: {}", mail.subject));
             app.logs.push("".into());
-            // Split body into lines for better display
             for line in mail.body.lines() {
                 app.logs.push(line.to_string());
             }
@@ -83,47 +49,17 @@ impl Command for ReadMailCommand {
             app.logs
                 .push(format!("Error: Mail with ID {} not found.", id));
         }
-
-        CommandResult::Ok
     }
 
-    fn completions(&self, app: &App, _arg_index: usize, prefix: &str) -> Vec<String> {
-        app.inbox
-            .iter()
-            .map(|m| m.id.to_string())
-            .filter(|id| id.starts_with(prefix))
-            .collect()
-    }
-}
-
-pub struct DeleteMailCommand;
-
-impl Command for DeleteMailCommand {
-    fn name(&self) -> &'static str {
-        "delete"
-    }
-
-    fn aliases(&self) -> &[&'static str] {
-        &[]
-    }
-
-    fn description(&self) -> &'static str {
-        "Delete a mail message"
-    }
-
-    fn usage(&self) -> &'static str {
-        "delete <id>"
-    }
-
-    fn execute(&self, app: &mut App, args: &[&str], _registry: &CommandRegistry) -> CommandResult {
+    fn delete_mail(&self, app: &mut App, args: &[&str]) {
         let Some(&id_str) = args.first() else {
-            app.logs.push("Usage: delete <mail_id>".into());
-            return CommandResult::Ok;
+            app.logs.push("Usage: mail delete <mail_id>".into());
+            return;
         };
 
         let Ok(id) = id_str.parse::<u32>() else {
             app.logs.push("Error: Invalid mail ID.".into());
-            return CommandResult::Ok;
+            return;
         };
 
         let initial_len = app.inbox.len();
@@ -135,15 +71,58 @@ impl Command for DeleteMailCommand {
             app.logs
                 .push(format!("Error: Mail with ID {} not found.", id));
         }
+    }
+}
 
+impl Command for MailCommand {
+    fn name(&self) -> &'static str {
+        "mail"
+    }
+
+    fn aliases(&self) -> &[&'static str] {
+        &["inbox", "messages"]
+    }
+
+    fn description(&self) -> &'static str {
+        "Manage mail inbox"
+    }
+
+    fn usage(&self) -> &'static str {
+        "mail [read|delete] [id]"
+    }
+
+    fn execute(&self, app: &mut App, args: &[&str], _registry: &CommandRegistry) -> CommandResult {
+        match args.first().copied() {
+            None => self.show_inbox(app),
+            Some("read") => self.read_mail(app, &args[1..]),
+            Some("delete") => self.delete_mail(app, &args[1..]),
+            Some(subcmd) => {
+                app.logs.push(format!("Unknown subcommand: {}", subcmd));
+                app.logs.push("Usage: mail [read|delete] [id]".into());
+            }
+        }
         CommandResult::Ok
     }
 
-    fn completions(&self, app: &App, _arg_index: usize, prefix: &str) -> Vec<String> {
-        app.inbox
-            .iter()
-            .map(|m| m.id.to_string())
-            .filter(|id| id.starts_with(prefix))
-            .collect()
+    fn completions(&self, app: &App, arg_index: usize, prefix: &str) -> Vec<String> {
+        match arg_index {
+            0 => {
+                // Complete subcommands
+                ["read", "delete"]
+                    .iter()
+                    .filter(|s| s.starts_with(prefix))
+                    .map(|s| s.to_string())
+                    .collect()
+            }
+            1 => {
+                // Complete mail IDs
+                app.inbox
+                    .iter()
+                    .map(|m| m.id.to_string())
+                    .filter(|id| id.starts_with(prefix))
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
     }
 }
