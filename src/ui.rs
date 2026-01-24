@@ -25,12 +25,14 @@ pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
                 .title(" ACTIVE TRACE ")
                 .borders(Borders::ALL),
         )
-        .gauge_style(Style::default().fg(if app.trace_percentage > 70.0 {
-            Color::Red
-        } else {
-            Color::Yellow
-        }))
-        .percent(app.trace_percentage as u16);
+        .gauge_style(
+            Style::default().fg(if app.connection.trace_percentage > 70.0 {
+                Color::Red
+            } else {
+                Color::Yellow
+            }),
+        )
+        .percent(app.connection.trace_percentage as u16);
     f.render_widget(gauge, main_layout[0]);
 
     // 2. Interaction Layer
@@ -40,9 +42,9 @@ pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
         .split(main_layout[1]);
 
     // MAP: Using Canvas
-    let servers_clone: Vec<Server> = app.servers.values().cloned().collect();
-    let path_clone = app.connection_path.clone();
-    let servers_map_clone = app.servers.clone();
+    let servers_clone: Vec<Server> = app.world.servers.values().cloned().collect();
+    let path_clone = app.connection.path.clone();
+    let servers_map_clone = app.world.servers.clone();
     let animation_tick = app.animation_tick; // Capture animation_tick by value
 
     let map = Canvas::default()
@@ -96,12 +98,13 @@ pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
 
     // Tool/Server Info Panel
     let target_name = app
+        .connection
         .target_ip
         .as_ref()
-        .map(|ip| app.servers[ip].name.as_str())
+        .map(|ip| app.world.servers[ip].name.as_str())
         .unwrap_or("None");
-    let firewall_status = if let Some(ip) = &app.target_ip {
-        if let Some(server) = app.servers.get(ip) {
+    let firewall_status = if let Some(ip) = &app.connection.target_ip {
+        if let Some(server) = app.world.servers.get(ip) {
             if let Some(firewall) = &server.firewall {
                 if firewall.is_active {
                     format!("ACTIVE ({})", firewall.strength)
@@ -117,19 +120,24 @@ pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
     } else {
         "N/A".to_string()
     };
-    let unread_mail_count = app.inbox.iter().filter(|m| !m.is_read).count();
+    let unread_mail_count = app.player.unread_mail_count();
     let mail_status = if unread_mail_count > 0 {
         format!("{} NEW", unread_mail_count)
     } else {
         "None".to_string()
     };
-    let local_file_names: Vec<&str> = app.local_files.iter().map(|f| f.name.as_str()).collect();
+    let local_file_names: Vec<&str> = app
+        .player
+        .local_files
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
     let tool_names = registry.tool_registry.names();
     let info_text = format!(
         "Credits: {}c\n\nTarget: {}\nStatus: {}\nFirewall: {}\nUnread Mail: {}\n\nLocal Files: {:?}\nTools: {:?}",
-        app.credits,
+        app.player.credits,
         target_name,
-        if app.target_ip.is_some() {
+        if app.connection.target_ip.is_some() {
             "CONNECTED"
         } else {
             "IDLE"
@@ -157,19 +165,22 @@ pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
     // Calculate how many lines fit in the logs area (height - 2 for borders)
     let logs_height = hud_chunks[0].height.saturating_sub(2) as usize;
     // Clamp scroll to valid range
-    let max_scroll = app.logs_len().saturating_sub(logs_height);
-    if app.log_scroll > max_scroll {
-        app.log_scroll = max_scroll;
+    let max_scroll = app.terminal.logs_len().saturating_sub(logs_height);
+    if app.terminal.log_scroll > max_scroll {
+        app.terminal.log_scroll = max_scroll;
     }
     // Calculate the range of logs to show based on scroll position
-    let end_index = app.logs_len().saturating_sub(app.log_scroll);
+    let end_index = app
+        .terminal
+        .logs_len()
+        .saturating_sub(app.terminal.log_scroll);
     let start_index = end_index.saturating_sub(logs_height);
-    let logs_to_show: Vec<ListItem> = app.logs()[start_index..end_index]
+    let logs_to_show: Vec<ListItem> = app.terminal.logs()[start_index..end_index]
         .iter()
         .map(|l: &String| ListItem::new(l.as_str()))
         .collect();
-    let scroll_indicator = if app.log_scroll > 0 {
-        format!(" LOGS [+{}] ", app.log_scroll)
+    let scroll_indicator = if app.terminal.log_scroll > 0 {
+        format!(" LOGS [+{}] ", app.terminal.log_scroll)
     } else {
         " LOGS ".to_string()
     };
@@ -181,7 +192,7 @@ pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
     f.render_widget(logs, hud_chunks[0]);
 
     // Right panel: Tool progress or Missions
-    if let Some(ref active_tool) = app.active_tool {
+    if let Some(ref active_tool) = app.connection.active_tool {
         let tool_gauge = Gauge::default()
             .block(
                 Block::default()
@@ -194,6 +205,7 @@ pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
     } else {
         // Show missions panel
         let mission_items: Vec<ListItem> = app
+            .player
             .missions
             .iter()
             .map(|m| {
@@ -211,13 +223,13 @@ pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
     // 4. Console with cursor
     let input_area = main_layout[3];
     f.render_widget(
-        Paragraph::new(format!("> {}", app.input))
+        Paragraph::new(format!("> {}", app.terminal.input))
             .block(Block::default().borders(Borders::ALL).fg(Color::Yellow)),
         input_area,
     );
     // Set cursor position (account for border and "> " prompt)
     f.set_cursor_position((
-        input_area.x + 1 + 2 + app.cursor_pos as u16, // border + "> " + cursor
-        input_area.y + 1,                             // border
+        input_area.x + 1 + 2 + app.terminal.cursor_pos as u16, // border + "> " + cursor
+        input_area.y + 1,                                      // border
     ));
 }

@@ -5,11 +5,12 @@ pub struct MailCommand;
 
 impl MailCommand {
     fn show_inbox(&self, app: &mut App) {
-        if app.inbox.is_empty() {
+        if app.player.inbox.is_empty() {
             app.log("Inbox is empty.");
         } else {
             // Collect mail info first to avoid borrow issues
             let mail_lines: Vec<_> = app
+                .player
                 .inbox
                 .iter()
                 .map(|mail| {
@@ -20,7 +21,7 @@ impl MailCommand {
                     )
                 })
                 .collect();
-            let unread = app.inbox.iter().filter(|m| !m.is_read).count();
+            let unread = app.player.unread_mail_count();
 
             app.log("--- INBOX ---");
             for line in mail_lines {
@@ -45,7 +46,7 @@ impl MailCommand {
         };
 
         // Find and extract mail content first
-        let mail_content = app.inbox.iter().find(|m| m.id == id).map(|mail| {
+        let mail_content = app.player.inbox.iter().find(|m| m.id == id).map(|mail| {
             (
                 mail.id,
                 mail.sender.clone(),
@@ -64,7 +65,7 @@ impl MailCommand {
             }
             app.log("-------------------");
             // Mark as read after logging
-            if let Some(mail) = app.inbox.iter_mut().find(|m| m.id == id) {
+            if let Some(mail) = app.player.inbox.iter_mut().find(|m| m.id == id) {
                 mail.is_read = true;
             }
         } else {
@@ -83,10 +84,10 @@ impl MailCommand {
             return;
         };
 
-        let initial_len = app.inbox.len();
-        app.inbox.retain(|m| m.id != id);
+        let initial_len = app.player.inbox.len();
+        app.player.inbox.retain(|m| m.id != id);
 
-        if app.inbox.len() < initial_len {
+        if app.player.inbox.len() < initial_len {
             app.log(format!("Mail {} deleted.", id));
         } else {
             app.log(format!("Error: Mail with ID {} not found.", id));
@@ -136,7 +137,8 @@ impl Command for MailCommand {
             }
             1 => {
                 // Complete mail IDs
-                app.inbox
+                app.player
+                    .inbox
                     .iter()
                     .map(|m| m.id.to_string())
                     .filter(|id| id.starts_with(prefix))

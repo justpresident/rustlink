@@ -13,7 +13,7 @@ impl Tool for PasswordBreaker {
     }
 
     fn can_run(&self, app: &App, target_ip: &str) -> Result<(), String> {
-        let Some(server) = app.servers.get(target_ip) else {
+        let Some(server) = app.world.get(target_ip) else {
             return Err("Target server not found.".into());
         };
 
@@ -37,7 +37,7 @@ impl Tool for PasswordBreaker {
     }
 
     fn on_complete(&self, app: &mut App, target_ip: &str) {
-        if let Some(server) = app.servers.get_mut(target_ip) {
+        if let Some(server) = app.world.get_mut(target_ip) {
             server.is_locked = false;
             app.log(format!("SUCCESS: Password cracked on {}", target_ip));
         }

@@ -32,48 +32,48 @@ async fn main() -> anyhow::Result<()> {
                 }
                 // Ctrl+A - move to start of line
                 KeyCode::Char('a') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                    app.move_cursor_start();
+                    app.terminal.move_cursor_start();
                 }
                 // Ctrl+E - move to end of line
                 KeyCode::Char('e') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                    app.move_cursor_end();
+                    app.terminal.move_cursor_end();
                 }
                 // Ctrl+U - clear line
                 KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                    app.clear_line();
+                    app.terminal.clear_line();
                 }
                 // Ctrl+W - delete word
                 KeyCode::Char('w') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                    app.delete_word();
+                    app.terminal.delete_word();
                 }
                 // Regular character input
-                KeyCode::Char(c) => app.insert_char(c),
+                KeyCode::Char(c) => app.terminal.insert_char(c),
                 // Backspace - delete char before cursor
-                KeyCode::Backspace => app.delete_char(),
+                KeyCode::Backspace => app.terminal.delete_char(),
                 // Delete - delete char at cursor
-                KeyCode::Delete => app.delete_char_forward(),
+                KeyCode::Delete => app.terminal.delete_char_forward(),
                 // Arrow keys
-                KeyCode::Left => app.move_cursor_left(),
-                KeyCode::Right => app.move_cursor_right(),
-                KeyCode::Up => app.scroll_logs_up(2),
-                KeyCode::Down => app.scroll_logs_down(2),
+                KeyCode::Left => app.terminal.move_cursor_left(),
+                KeyCode::Right => app.terminal.move_cursor_right(),
+                KeyCode::Up => app.terminal.scroll_logs_up(2),
+                KeyCode::Down => app.terminal.scroll_logs_down(2),
                 // Home/End
-                KeyCode::Home => app.move_cursor_start(),
-                KeyCode::End => app.move_cursor_end(),
+                KeyCode::Home => app.terminal.move_cursor_start(),
+                KeyCode::End => app.terminal.move_cursor_end(),
                 // Page Up/Down
-                KeyCode::PageUp => app.history_up(),
-                KeyCode::PageDown => app.history_down(),
+                KeyCode::PageUp => app.terminal.history_up(),
+                KeyCode::PageDown => app.terminal.history_down(),
                 // Tab - autocomplete
                 KeyCode::Tab => {
-                    let completions = get_completions(&registry, &app, &app.input);
-                    app.apply_completions(completions);
+                    let completions = get_completions(&registry, &app, &app.terminal.input);
+                    app.terminal.apply_completions(completions);
                 }
                 // Enter - execute command
                 KeyCode::Enter => {
-                    app.save_to_history();
+                    app.terminal.save_to_history();
                     execute_input(&registry, &mut app);
-                    app.input.clear();
-                    app.cursor_pos = 0;
+                    app.terminal.input.clear();
+                    app.terminal.cursor_pos = 0;
                 }
                 _ => {}
             }

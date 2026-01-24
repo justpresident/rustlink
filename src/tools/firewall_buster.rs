@@ -13,7 +13,7 @@ impl Tool for FirewallBuster {
     }
 
     fn can_run(&self, app: &App, target_ip: &str) -> Result<(), String> {
-        let Some(server) = app.servers.get(target_ip) else {
+        let Some(server) = app.world.get(target_ip) else {
             return Err("Target server not found.".into());
         };
 
@@ -27,7 +27,7 @@ impl Tool for FirewallBuster {
     fn on_tick(&self, app: &App, target_ip: &str, current_progress: f64) -> f64 {
         // Speed depends on firewall strength (higher strength = slower)
         let strength = app
-            .servers
+            .world
             .get(target_ip)
             .and_then(|s| s.firewall.as_ref())
             .map(|fw| fw.strength)
@@ -39,7 +39,7 @@ impl Tool for FirewallBuster {
     }
 
     fn on_complete(&self, app: &mut App, target_ip: &str) {
-        if let Some(server) = app.servers.get_mut(target_ip)
+        if let Some(server) = app.world.get_mut(target_ip)
             && let Some(firewall) = &mut server.firewall
         {
             firewall.is_active = false;

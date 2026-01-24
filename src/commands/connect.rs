@@ -23,19 +23,14 @@ impl Command for ConnectCommand {
     fn execute(&self, app: &mut App, args: &[&str], _registry: &CommandRegistry) -> CommandResult {
         if let Some(&ip) = args.first() {
             // Check if already in connection path
-            if app.connection_path.contains(&ip.to_string()) {
+            if app.connection.is_in_path(ip) {
                 app.log(format!("Error: Already connected through {}", ip));
                 return CommandResult::Ok;
             }
 
-            if let Some(server) = app.servers.get(ip) {
-                app.connection_path.push(ip.to_string());
-                app.target_ip = Some(ip.to_string());
-                // Only start trace for illegal servers (locked or with firewall)
+            if let Some(server) = app.world.get(ip) {
                 let is_illegal = server.is_locked || server.firewall.is_some();
-                if is_illegal {
-                    app.is_tracing = true;
-                }
+                app.connection.connect(ip, is_illegal);
                 app.log(format!("Connected to {}", ip));
             } else {
                 app.log(format!("Error: Unknown IP {}", ip));
@@ -47,9 +42,10 @@ impl Command for ConnectCommand {
     }
 
     fn completions(&self, app: &App, _arg_index: usize, prefix: &str) -> Vec<String> {
-        app.servers
+        app.world
+            .servers
             .keys()
-            .filter(|ip| ip.starts_with(prefix))
+            .filter(|ip: &&String| ip.starts_with(prefix))
             .cloned()
             .collect()
     }

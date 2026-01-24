@@ -17,8 +17,8 @@ impl Command for LsCommand {
     }
 
     fn execute(&self, app: &mut App, _args: &[&str], _registry: &CommandRegistry) -> CommandResult {
-        if let Some(target) = &app.target_ip {
-            let server = &app.servers[target];
+        if let Some(target) = &app.connection.target_ip {
+            let server = &app.world.servers[target];
 
             // Check firewall first
             if let Some(firewall) = &server.firewall
@@ -79,12 +79,12 @@ impl Command for ScpCommand {
             return CommandResult::Ok;
         };
 
-        let Some(target) = app.target_ip.clone() else {
+        let Some(target) = app.connection.target_ip.clone() else {
             app.log("Not connected to any server.");
             return CommandResult::Ok;
         };
 
-        let server = &app.servers[&target];
+        let server = &app.world.servers[&target];
 
         // Check firewall
         if let Some(firewall) = &server.firewall
@@ -100,8 +100,10 @@ impl Command for ScpCommand {
         }
 
         if let Some(file) = server.fs.files.iter().find(|f| f.name == filename) {
-            app.local_files.push(file.clone());
-            app.log(format!("Downloaded '{}' ({} bytes)", filename, file.size));
+            let file_clone = file.clone();
+            let size = file.size;
+            app.player.add_file(file_clone);
+            app.log(format!("Downloaded '{}' ({} bytes)", filename, size));
             app.check_missions(filename);
         } else {
             app.log(format!("File '{}' not found.", filename));
@@ -111,8 +113,8 @@ impl Command for ScpCommand {
     }
 
     fn completions(&self, app: &App, _arg_index: usize, prefix: &str) -> Vec<String> {
-        if let Some(target) = &app.target_ip
-            && let Some(server) = app.servers.get(target)
+        if let Some(target) = &app.connection.target_ip
+            && let Some(server) = app.world.servers.get(target)
             && !server.is_locked
         {
             return server

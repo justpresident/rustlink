@@ -17,7 +17,7 @@ impl Command for ClearCommand {
     }
 
     fn execute(&self, app: &mut App, _args: &[&str], _registry: &CommandRegistry) -> CommandResult {
-        app.clear_logs();
+        app.terminal.clear_logs();
         CommandResult::Ok
     }
 }

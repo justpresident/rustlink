@@ -34,7 +34,7 @@ impl Command for RunCommand {
             return CommandResult::Ok;
         };
 
-        let Some(target) = app.target_ip.clone() else {
+        let Some(target) = app.connection.target_ip.clone() else {
             app.log("Not connected to any server.");
             return CommandResult::Ok;
         };
@@ -50,7 +50,7 @@ impl Command for RunCommand {
         };
 
         // Check if already running a tool
-        if app.active_tool.is_some() {
+        if app.connection.active_tool.is_some() {
             app.log("A tool is already running. Wait for it to complete.");
             return CommandResult::Ok;
         }
@@ -63,7 +63,7 @@ impl Command for RunCommand {
 
         // Start the tool
         tool.on_start(app, &target);
-        app.active_tool = Some(ActiveTool::new(tool_name, &target));
+        app.connection.active_tool = Some(ActiveTool::new(tool_name, &target));
 
         CommandResult::Ok
     }

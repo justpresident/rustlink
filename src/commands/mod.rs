@@ -133,7 +133,7 @@ impl Default for CommandRegistry {
 
 /// Execute a command line input
 pub fn execute_input(registry: &CommandRegistry, app: &mut App) -> CommandResult {
-    let input = app.input.trim().to_string();
+    let input = app.terminal.input.trim().to_string();
     let parts: Vec<&str> = input.split_whitespace().collect();
 
     if parts.is_empty() {
