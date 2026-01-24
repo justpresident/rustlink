@@ -26,6 +26,11 @@ pub struct App {
     pub missions: Vec<Mission>,
     pub inbox: Vec<Mail>,
     pub animation_tick: u64,
+
+    // Readline-like input state
+    pub cursor_pos: usize,
+    pub command_history: Vec<String>,
+    pub history_index: Option<usize>,
 }
 
 impl App {
@@ -164,6 +169,9 @@ impl App {
                 },
             ],
             animation_tick: 0,
+            cursor_pos: 0,
+            command_history: Vec::new(),
+            history_index: None,
         }
     }
 
@@ -228,6 +236,238 @@ impl App {
                 self.credits += m.reward;
                 self.logs.push(format!("MISSION COMPLETE: +{}c", m.reward));
             }
+        }
+    }
+
+    // Input handling methods
+    pub fn insert_char(&mut self, c: char) {
+        self.input.insert(self.cursor_pos, c);
+        self.cursor_pos += 1;
+        self.history_index = None;
+    }
+
+    pub fn delete_char(&mut self) {
+        if self.cursor_pos > 0 {
+            self.cursor_pos -= 1;
+            self.input.remove(self.cursor_pos);
+        }
+    }
+
+    pub fn delete_char_forward(&mut self) {
+        if self.cursor_pos < self.input.len() {
+            self.input.remove(self.cursor_pos);
+        }
+    }
+
+    pub fn move_cursor_left(&mut self) {
+        if self.cursor_pos > 0 {
+            self.cursor_pos -= 1;
+        }
+    }
+
+    pub fn move_cursor_right(&mut self) {
+        if self.cursor_pos < self.input.len() {
+            self.cursor_pos += 1;
+        }
+    }
+
+    pub fn move_cursor_start(&mut self) {
+        self.cursor_pos = 0;
+    }
+
+    pub fn move_cursor_end(&mut self) {
+        self.cursor_pos = self.input.len();
+    }
+
+    pub fn clear_line(&mut self) {
+        self.input.clear();
+        self.cursor_pos = 0;
+    }
+
+    pub fn delete_word(&mut self) {
+        // Delete word before cursor (Ctrl+W)
+        while self.cursor_pos > 0 && self.input.chars().nth(self.cursor_pos - 1) == Some(' ') {
+            self.cursor_pos -= 1;
+            self.input.remove(self.cursor_pos);
+        }
+        while self.cursor_pos > 0 && self.input.chars().nth(self.cursor_pos - 1) != Some(' ') {
+            self.cursor_pos -= 1;
+            self.input.remove(self.cursor_pos);
+        }
+    }
+
+    pub fn history_up(&mut self) {
+        if self.command_history.is_empty() {
+            return;
+        }
+        match self.history_index {
+            None => {
+                self.history_index = Some(self.command_history.len() - 1);
+            }
+            Some(idx) if idx > 0 => {
+                self.history_index = Some(idx - 1);
+            }
+            _ => return,
+        }
+        if let Some(idx) = self.history_index {
+            self.input = self.command_history[idx].clone();
+            self.cursor_pos = self.input.len();
+        }
+    }
+
+    pub fn history_down(&mut self) {
+        match self.history_index {
+            Some(idx) if idx < self.command_history.len() - 1 => {
+                self.history_index = Some(idx + 1);
+                self.input = self.command_history[idx + 1].clone();
+                self.cursor_pos = self.input.len();
+            }
+            Some(_) => {
+                self.history_index = None;
+                self.input.clear();
+                self.cursor_pos = 0;
+            }
+            None => {}
+        }
+    }
+
+    pub fn save_to_history(&mut self) {
+        let trimmed = self.input.trim().to_string();
+        if !trimmed.is_empty() {
+            // Don't add duplicates consecutively
+            if self.command_history.last() != Some(&trimmed) {
+                self.command_history.push(trimmed);
+            }
+        }
+        self.history_index = None;
+    }
+
+    pub fn autocomplete(&mut self) {
+        let parts: Vec<&str> = self.input.split_whitespace().collect();
+        let input_ends_with_space = self.input.ends_with(' ');
+
+        let completions: Vec<String> = if parts.is_empty() || (parts.len() == 1 && !input_ends_with_space) {
+            // Complete command
+            let prefix = parts.first().map(|s| *s).unwrap_or("");
+            self.get_command_completions(prefix)
+        } else {
+            // Complete argument based on command
+            let cmd = parts[0];
+            let arg_prefix = if input_ends_with_space { "" } else { parts.last().map(|s| *s).unwrap_or("") };
+            self.get_argument_completions(cmd, arg_prefix)
+        };
+
+        if completions.len() == 1 {
+            // Single match - complete it
+            self.apply_completion(&completions[0]);
+        } else if completions.len() > 1 {
+            // Multiple matches - show them
+            self.logs.push(format!("Completions: {}", completions.join(" ")));
+            // Find common prefix and apply it
+            if let Some(common) = Self::common_prefix(&completions) {
+                self.apply_completion(&common);
+            }
+        }
+    }
+
+    fn get_command_completions(&self, prefix: &str) -> Vec<String> {
+        let commands = ["help", "connect", "ls", "scp", "run", "inbox", "read", "delete", "disconnect", "clear", "exit"];
+        commands
+            .iter()
+            .filter(|cmd| cmd.starts_with(prefix))
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    fn get_argument_completions(&self, cmd: &str, prefix: &str) -> Vec<String> {
+        match cmd {
+            "connect" => {
+                // Complete IP addresses
+                self.servers
+                    .keys()
+                    .filter(|ip| ip.starts_with(prefix))
+                    .cloned()
+                    .collect()
+            }
+            "run" => {
+                // Complete tool names
+                self.inventory
+                    .iter()
+                    .filter(|tool| tool.starts_with(prefix))
+                    .cloned()
+                    .collect()
+            }
+            "scp" => {
+                // Complete filenames from current target
+                if let Some(target) = &self.target_ip {
+                    if let Some(server) = self.servers.get(target) {
+                        return server
+                            .fs
+                            .files
+                            .iter()
+                            .map(|f| &f.name)
+                            .filter(|name| name.starts_with(prefix))
+                            .cloned()
+                            .collect();
+                    }
+                }
+                Vec::new()
+            }
+            "read" | "delete" => {
+                // Complete mail IDs
+                self.inbox
+                    .iter()
+                    .map(|m| m.id.to_string())
+                    .filter(|id| id.starts_with(prefix))
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn apply_completion(&mut self, completion: &str) {
+        let parts: Vec<&str> = self.input.split_whitespace().collect();
+        let input_ends_with_space = self.input.ends_with(' ');
+
+        if parts.is_empty() || (parts.len() == 1 && !input_ends_with_space) {
+            // Completing command
+            self.input = completion.to_string() + " ";
+        } else {
+            // Completing argument - rebuild input
+            let mut new_input: Vec<&str> = parts[..parts.len() - 1].to_vec();
+            if !input_ends_with_space {
+                // Replace last partial arg
+            } else {
+                new_input = parts.to_vec();
+            }
+            self.input = new_input.join(" ");
+            if !self.input.is_empty() {
+                self.input.push(' ');
+            }
+            self.input.push_str(completion);
+            self.input.push(' ');
+        }
+        self.cursor_pos = self.input.len();
+    }
+
+    fn common_prefix(strings: &[String]) -> Option<String> {
+        if strings.is_empty() {
+            return None;
+        }
+        let first = &strings[0];
+        let mut prefix_len = first.len();
+        for s in &strings[1..] {
+            prefix_len = first
+                .chars()
+                .zip(s.chars())
+                .take_while(|(a, b)| a == b)
+                .count()
+                .min(prefix_len);
+        }
+        if prefix_len > 0 {
+            Some(first[..first.char_indices().nth(prefix_len).map(|(i, _)| i).unwrap_or(first.len())].to_string())
+        } else {
+            None
         }
     }
 }

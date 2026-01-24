@@ -154,14 +154,16 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(main_layout[2]);
 
-    let logs = List::new(
-        app.logs
-            .iter()
-            .rev()
-            .map(|l| ListItem::new(l.as_str()))
-            .collect::<Vec<_>>(),
-    )
-    .block(Block::default().title(" LOGS ").borders(Borders::ALL));
+    // Calculate how many lines fit in the logs area (height - 2 for borders)
+    let logs_height = hud_chunks[0].height.saturating_sub(2) as usize;
+    let logs_to_show: Vec<ListItem> = app
+        .logs
+        .iter()
+        .skip(app.logs.len().saturating_sub(logs_height))
+        .map(|l| ListItem::new(l.as_str()))
+        .collect();
+    let logs = List::new(logs_to_show)
+        .block(Block::default().title(" LOGS ").borders(Borders::ALL));
     f.render_widget(logs, hud_chunks[0]);
 
     // Right panel: Tool progress or Missions
@@ -192,10 +194,16 @@ pub fn render(f: &mut Frame, app: &mut App) {
         );
     }
 
-    // 4. Console
+    // 4. Console with cursor
+    let input_area = main_layout[3];
     f.render_widget(
         Paragraph::new(format!("> {}", app.input))
             .block(Block::default().borders(Borders::ALL).fg(Color::Yellow)),
-        main_layout[3],
+        input_area,
     );
+    // Set cursor position (account for border and "> " prompt)
+    f.set_cursor_position((
+        input_area.x + 1 + 2 + app.cursor_pos as u16, // border + "> " + cursor
+        input_area.y + 1, // border
+    ));
 }
