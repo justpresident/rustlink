@@ -80,7 +80,7 @@ impl Command for MailCommand {
     }
 
     fn aliases(&self) -> &[&'static str] {
-        &["inbox", "messages"]
+        &[]
     }
 
     fn description(&self) -> &'static str {

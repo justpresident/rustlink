@@ -48,7 +48,13 @@ pub trait Command: Send + Sync {
     }
 
     /// Get completions with access to tool registry
-    fn completions_with_tools(&self, app: &App, arg_index: usize, prefix: &str, tool_registry: &ToolRegistry) -> Vec<String> {
+    fn completions_with_tools(
+        &self,
+        app: &App,
+        arg_index: usize,
+        prefix: &str,
+        tool_registry: &ToolRegistry,
+    ) -> Vec<String> {
         let _ = tool_registry;
         self.completions(app, arg_index, prefix)
     }
@@ -73,6 +79,7 @@ impl CommandRegistry {
     fn register_defaults(&mut self) {
         // Register all built-in commands
         self.register(Box::new(help::HelpCommand));
+        self.register(Box::new(help::HelpKeysCommand));
         self.register(Box::new(misc::ClearCommand));
         self.register(Box::new(connect::ConnectCommand));
         self.register(Box::new(disconnect::DisconnectCommand));
@@ -90,9 +97,10 @@ impl CommandRegistry {
 
     /// Find a command by name or alias
     pub fn find(&self, name: &str) -> Option<&dyn Command> {
-        self.commands.iter().find(|cmd| {
-            cmd.name() == name || cmd.aliases().contains(&name)
-        }).map(|b| b.as_ref())
+        self.commands
+            .iter()
+            .find(|cmd| cmd.name() == name || cmd.aliases().contains(&name))
+            .map(|b| b.as_ref())
     }
 
     /// Get all registered commands
@@ -138,7 +146,10 @@ pub fn execute_input(registry: &CommandRegistry, app: &mut App) -> CommandResult
     if let Some(cmd) = registry.find(cmd_name) {
         cmd.execute(app, args, registry)
     } else {
-        app.logs.push(format!("Unknown command: {}. Type 'help' for available commands.", cmd_name));
+        app.logs.push(format!(
+            "Unknown command: {}. Type 'help' for available commands.",
+            cmd_name
+        ));
         CommandResult::Ok
     }
 }
@@ -156,8 +167,16 @@ pub fn get_completions(registry: &CommandRegistry, app: &App, input: &str) -> Ve
         // Complete command arguments
         let cmd_name = parts[0];
         if let Some(cmd) = registry.find(cmd_name) {
-            let arg_index = if ends_with_space { parts.len() - 1 } else { parts.len() - 2 };
-            let prefix = if ends_with_space { "" } else { parts.last().copied().unwrap_or("") };
+            let arg_index = if ends_with_space {
+                parts.len() - 1
+            } else {
+                parts.len() - 2
+            };
+            let prefix = if ends_with_space {
+                ""
+            } else {
+                parts.last().copied().unwrap_or("")
+            };
             // Use completions_with_tools to allow access to tool registry
             cmd.completions_with_tools(app, arg_index, prefix, &registry.tool_registry)
         } else {

@@ -2,6 +2,7 @@ use super::{Command, CommandRegistry, CommandResult};
 use crate::app::App;
 
 pub struct HelpCommand;
+pub struct HelpKeysCommand;
 
 impl Command for HelpCommand {
     fn name(&self) -> &'static str {
@@ -34,9 +35,33 @@ impl Command for HelpCommand {
             } else {
                 format!(" ({})", aliases.join(", "))
             };
-            app.logs.push(format!("  {}{}- {}{}", usage, padding, cmd.description(), alias_str));
+            app.logs.push(format!(
+                "  {}{}- {}{}",
+                usage,
+                padding,
+                cmd.description(),
+                alias_str
+            ));
         }
 
+        CommandResult::Ok
+    }
+}
+
+impl Command for HelpKeysCommand {
+    fn name(&self) -> &'static str {
+        "keys"
+    }
+
+    fn aliases(&self) -> &[&'static str] {
+        &[]
+    }
+
+    fn description(&self) -> &'static str {
+        "Show available shortcuts"
+    }
+
+    fn execute(&self, app: &mut App, _args: &[&str], _registry: &CommandRegistry) -> CommandResult {
         app.logs.push("".into());
         app.logs.push("Keyboard shortcuts:".into());
         app.logs.push("  Tab       - Autocomplete".into());
