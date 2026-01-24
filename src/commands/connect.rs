@@ -22,10 +22,21 @@ impl Command for ConnectCommand {
 
     fn execute(&self, app: &mut App, args: &[&str], _registry: &CommandRegistry) -> CommandResult {
         if let Some(&ip) = args.first() {
-            if app.servers.contains_key(ip) {
+            // Check if already in connection path
+            if app.connection_path.contains(&ip.to_string()) {
+                app.logs
+                    .push(format!("Error: Already connected through {}", ip));
+                return CommandResult::Ok;
+            }
+
+            if let Some(server) = app.servers.get(ip) {
                 app.connection_path.push(ip.to_string());
                 app.target_ip = Some(ip.to_string());
-                app.is_tracing = true;
+                // Only start trace for illegal servers (locked or with firewall)
+                let is_illegal = server.is_locked || server.firewall.is_some();
+                if is_illegal {
+                    app.is_tracing = true;
+                }
                 app.logs.push(format!("Connected to {}", ip));
             } else {
                 app.logs.push(format!("Error: Unknown IP {}", ip));

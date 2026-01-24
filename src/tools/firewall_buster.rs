@@ -24,9 +24,18 @@ impl Tool for FirewallBuster {
         }
     }
 
-    fn on_tick(&self, current_progress: f64) -> f64 {
-        // FirewallBuster is slower than PasswordBreaker
-        (current_progress + 1.8).min(100.0)
+    fn on_tick(&self, app: &App, target_ip: &str, current_progress: f64) -> f64 {
+        // Speed depends on firewall strength (higher strength = slower)
+        let strength = app
+            .servers
+            .get(target_ip)
+            .and_then(|s| s.firewall.as_ref())
+            .map(|fw| fw.strength)
+            .unwrap_or(50);
+
+        // Base speed of 3.0, reduced by strength (strength 100 = 0.5, strength 0 = 3.0)
+        let speed = 3.0 - (strength as f64 / 100.0 * 2.5);
+        (current_progress + speed).min(100.0)
     }
 
     fn on_complete(&self, app: &mut App, target_ip: &str) {

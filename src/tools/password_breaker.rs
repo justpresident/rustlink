@@ -31,7 +31,7 @@ impl Tool for PasswordBreaker {
         Ok(())
     }
 
-    fn on_tick(&self, current_progress: f64) -> f64 {
+    fn on_tick(&self, _app: &App, _target_ip: &str, current_progress: f64) -> f64 {
         // PasswordBreaker runs at moderate speed
         (current_progress + 2.5).min(100.0)
     }

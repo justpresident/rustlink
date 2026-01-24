@@ -179,12 +179,22 @@ impl App {
 
     pub fn on_tick(&mut self, tool_registry: &crate::tools::ToolRegistry) {
         // Handle Tool Progress
-        if let Some(ref mut active) = self.active_tool
-            && let Some(tool) = tool_registry.find(&active.tool_name)
+        let tool_info = self.active_tool.as_ref().map(|active| {
+            (
+                active.tool_name.clone(),
+                active.target_ip.clone(),
+                active.progress,
+            )
+        });
+
+        if let Some((tool_name, target_ip, progress)) = tool_info
+            && let Some(tool) = tool_registry.find(&tool_name)
         {
-            active.progress = tool.on_tick(active.progress);
-            if active.progress >= 100.0 {
-                let target_ip = active.target_ip.clone();
+            let new_progress = tool.on_tick(self, &target_ip, progress);
+            if let Some(ref mut active) = self.active_tool {
+                active.progress = new_progress;
+            }
+            if new_progress >= 100.0 {
                 tool.on_complete(self, &target_ip);
                 self.active_tool = None;
             }
@@ -193,7 +203,7 @@ impl App {
         // Handle Trace
         if self.is_tracing {
             if self.trace_percentage < 100.0 {
-                self.trace_percentage += 0.1;
+                self.trace_percentage += self.trace_speed();
             } else {
                 self.logs
                     .push("!!! TERMINAL COMPROMISED - DISCONNECTING !!!".into());
@@ -210,6 +220,63 @@ impl App {
         self.trace_percentage = 0.0;
         self.active_tool = None;
         self.credits = self.credits.saturating_sub(100); // Penalty for getting traced
+    }
+
+    /// Find the index of the first illegal node in the connection path
+    /// Returns None if no illegal nodes exist
+    fn first_illegal_index(&self) -> Option<usize> {
+        self.connection_path.iter().position(|ip| {
+            self.servers
+                .get(ip)
+                .map(|s| s.is_locked || s.firewall.is_some())
+                .unwrap_or(false)
+        })
+    }
+
+    /// Calculate the total distance of the connection path up to first illegal node
+    fn connection_distance(&self) -> f64 {
+        if self.connection_path.len() < 2 {
+            return 0.0;
+        }
+
+        // Only count distance up to (and including) the first illegal node
+        let end_index = self
+            .first_illegal_index()
+            .map(|i| i + 1)
+            .unwrap_or(self.connection_path.len());
+        let relevant_path = &self.connection_path[..end_index];
+
+        let mut total_distance = 0.0;
+        for window in relevant_path.windows(2) {
+            if let (Some(server_a), Some(server_b)) =
+                (self.servers.get(&window[0]), self.servers.get(&window[1]))
+            {
+                let (x1, y1) = server_a.coords;
+                let (x2, y2) = server_b.coords;
+                // Simple Euclidean distance (coords are lon/lat but this approximation works for game purposes)
+                let dx = x2 - x1;
+                let dy = y2 - y1;
+                total_distance += (dx * dx + dy * dy).sqrt();
+            }
+        }
+        total_distance
+    }
+
+    /// Calculate the trace speed based on hop count and total distance
+    /// Only counts hops/distance up to the first illegal node
+    fn trace_speed(&self) -> f64 {
+        let base_speed = 0.5; // Base trace speed per tick
+
+        // Only count hops up to (but not including) the first illegal node
+        let hop_count = self.first_illegal_index().unwrap_or(0);
+        let distance = self.connection_distance();
+
+        // Each hop reduces speed by ~40%, distance provides additional reduction
+        let hop_factor = 1.0 / (1.0 + hop_count as f64 * 0.4);
+        // Distance factor: every 100 units of distance reduces speed by ~20%
+        let distance_factor = 1.0 / (1.0 + distance / 500.0);
+
+        base_speed * hop_factor * distance_factor
     }
 
     pub fn check_missions(&mut self, filename: &str) {

@@ -31,7 +31,8 @@ pub trait Tool: Send + Sync {
 
     /// Called each tick while the tool is running
     /// Returns the new progress (0.0 to 100.0)
-    fn on_tick(&self, current_progress: f64) -> f64 {
+    fn on_tick(&self, app: &App, target_ip: &str, current_progress: f64) -> f64 {
+        let _ = (app, target_ip);
         // Default: increase by 2.5 per tick
         (current_progress + 2.5).min(100.0)
     }

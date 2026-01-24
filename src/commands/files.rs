@@ -109,6 +109,7 @@ impl Command for ScpCommand {
     fn completions(&self, app: &App, _arg_index: usize, prefix: &str) -> Vec<String> {
         if let Some(target) = &app.target_ip
             && let Some(server) = app.servers.get(target)
+            && !server.is_locked
         {
             return server
                 .fs
