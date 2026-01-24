@@ -24,8 +24,7 @@ impl Command for ConnectCommand {
         if let Some(&ip) = args.first() {
             // Check if already in connection path
             if app.connection_path.contains(&ip.to_string()) {
-                app.logs
-                    .push(format!("Error: Already connected through {}", ip));
+                app.log(format!("Error: Already connected through {}", ip));
                 return CommandResult::Ok;
             }
 
@@ -37,12 +36,12 @@ impl Command for ConnectCommand {
                 if is_illegal {
                     app.is_tracing = true;
                 }
-                app.logs.push(format!("Connected to {}", ip));
+                app.log(format!("Connected to {}", ip));
             } else {
-                app.logs.push(format!("Error: Unknown IP {}", ip));
+                app.log(format!("Error: Unknown IP {}", ip));
             }
         } else {
-            app.logs.push("Usage: connect <ip>".into());
+            app.log("Usage: connect <ip>");
         }
         CommandResult::Ok
     }

@@ -146,7 +146,7 @@ pub fn execute_input(registry: &CommandRegistry, app: &mut App) -> CommandResult
     if let Some(cmd) = registry.find(cmd_name) {
         cmd.execute(app, args, registry)
     } else {
-        app.logs.push(format!(
+        app.log(format!(
             "Unknown command: {}. Type 'help' for available commands.",
             cmd_name
         ));

@@ -25,8 +25,7 @@ pub trait Tool: Send + Sync {
 
     /// Called when the tool starts running
     fn on_start(&self, app: &mut App, target_ip: &str) {
-        app.logs
-            .push(format!("Running {} on {}...", self.name(), target_ip));
+        app.log(format!("Running {} on {}...", self.name(), target_ip));
     }
 
     /// Called each tick while the tool is running

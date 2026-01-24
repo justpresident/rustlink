@@ -6,59 +6,80 @@ pub struct MailCommand;
 impl MailCommand {
     fn show_inbox(&self, app: &mut App) {
         if app.inbox.is_empty() {
-            app.logs.push("Inbox is empty.".into());
+            app.log("Inbox is empty.");
         } else {
-            app.logs.push("--- INBOX ---".into());
-            for mail in &app.inbox {
-                let status = if mail.is_read { " " } else { "*" };
-                app.logs.push(format!(
-                    " {} [{}] From: {} - {}",
-                    status, mail.id, mail.sender, mail.subject
-                ));
-            }
-            app.logs.push("-------------".into());
+            // Collect mail info first to avoid borrow issues
+            let mail_lines: Vec<_> = app
+                .inbox
+                .iter()
+                .map(|mail| {
+                    let status = if mail.is_read { " " } else { "*" };
+                    format!(
+                        " {} [{}] From: {} - {}",
+                        status, mail.id, mail.sender, mail.subject
+                    )
+                })
+                .collect();
             let unread = app.inbox.iter().filter(|m| !m.is_read).count();
+
+            app.log("--- INBOX ---");
+            for line in mail_lines {
+                app.log(line);
+            }
+            app.log("-------------");
             if unread > 0 {
-                app.logs.push(format!("{} unread message(s)", unread));
+                app.log(format!("{} unread message(s)", unread));
             }
         }
     }
 
     fn read_mail(&self, app: &mut App, args: &[&str]) {
         let Some(&id_str) = args.first() else {
-            app.logs.push("Usage: mail read <mail_id>".into());
+            app.log("Usage: mail read <mail_id>");
             return;
         };
 
         let Ok(id) = id_str.parse::<u32>() else {
-            app.logs.push("Error: Invalid mail ID.".into());
+            app.log("Error: Invalid mail ID.");
             return;
         };
 
-        if let Some(mail) = app.inbox.iter_mut().find(|m| m.id == id) {
-            app.logs.push(format!("--- MAIL ID: {} ---", mail.id));
-            app.logs.push(format!("From: {}", mail.sender));
-            app.logs.push(format!("Subject: {}", mail.subject));
-            app.logs.push("".into());
-            for line in mail.body.lines() {
-                app.logs.push(line.to_string());
+        // Find and extract mail content first
+        let mail_content = app.inbox.iter().find(|m| m.id == id).map(|mail| {
+            (
+                mail.id,
+                mail.sender.clone(),
+                mail.subject.clone(),
+                mail.body.clone(),
+            )
+        });
+
+        if let Some((mail_id, sender, subject, body)) = mail_content {
+            app.log(format!("--- MAIL ID: {} ---", mail_id));
+            app.log(format!("From: {}", sender));
+            app.log(format!("Subject: {}", subject));
+            app.log(" ");
+            for line in body.lines() {
+                app.log(line);
             }
-            app.logs.push("-------------------".into());
-            mail.is_read = true;
+            app.log("-------------------");
+            // Mark as read after logging
+            if let Some(mail) = app.inbox.iter_mut().find(|m| m.id == id) {
+                mail.is_read = true;
+            }
         } else {
-            app.logs
-                .push(format!("Error: Mail with ID {} not found.", id));
+            app.log(format!("Error: Mail with ID {} not found.", id));
         }
     }
 
     fn delete_mail(&self, app: &mut App, args: &[&str]) {
         let Some(&id_str) = args.first() else {
-            app.logs.push("Usage: mail delete <mail_id>".into());
+            app.log("Usage: mail delete <mail_id>");
             return;
         };
 
         let Ok(id) = id_str.parse::<u32>() else {
-            app.logs.push("Error: Invalid mail ID.".into());
+            app.log("Error: Invalid mail ID.");
             return;
         };
 
@@ -66,10 +87,9 @@ impl MailCommand {
         app.inbox.retain(|m| m.id != id);
 
         if app.inbox.len() < initial_len {
-            app.logs.push(format!("Mail {} deleted.", id));
+            app.log(format!("Mail {} deleted.", id));
         } else {
-            app.logs
-                .push(format!("Error: Mail with ID {} not found.", id));
+            app.log(format!("Error: Mail with ID {} not found.", id));
         }
     }
 }
@@ -97,8 +117,8 @@ impl Command for MailCommand {
             Some("read") => self.read_mail(app, &args[1..]),
             Some("delete") => self.delete_mail(app, &args[1..]),
             Some(subcmd) => {
-                app.logs.push(format!("Unknown subcommand: {}", subcmd));
-                app.logs.push("Usage: mail [read|delete] [id]".into());
+                app.log(format!("Unknown subcommand: {}", subcmd));
+                app.log("Usage: mail [read|delete] [id]");
             }
         }
         CommandResult::Ok

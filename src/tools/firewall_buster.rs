@@ -43,8 +43,7 @@ impl Tool for FirewallBuster {
             && let Some(firewall) = &mut server.firewall
         {
             firewall.is_active = false;
-            app.logs
-                .push(format!("SUCCESS: Firewall disabled on {}", target_ip));
+            app.log(format!("SUCCESS: Firewall disabled on {}", target_ip));
         }
     }
 }

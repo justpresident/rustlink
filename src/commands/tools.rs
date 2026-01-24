@@ -26,41 +26,38 @@ impl Command for RunCommand {
         let tool_registry = &registry.tool_registry;
 
         let Some(&tool_name) = args.first() else {
-            app.logs.push("Usage: run <tool>".into());
-            app.logs.push("Available tools:".into());
+            app.log("Usage: run <tool>");
+            app.log("Available tools:");
             for tool in tool_registry.all() {
-                app.logs
-                    .push(format!("  {} - {}", tool.name(), tool.description()));
+                app.log(format!("  {} - {}", tool.name(), tool.description()));
             }
             return CommandResult::Ok;
         };
 
         let Some(target) = app.target_ip.clone() else {
-            app.logs.push("Not connected to any server.".into());
+            app.log("Not connected to any server.");
             return CommandResult::Ok;
         };
 
         // Find the tool in the registry
         let Some(tool) = tool_registry.find(tool_name) else {
-            app.logs.push(format!("Tool '{}' not found.", tool_name));
-            app.logs.push("Available tools:".into());
+            app.log(format!("Tool '{}' not found.", tool_name));
+            app.log("Available tools:");
             for t in tool_registry.all() {
-                app.logs
-                    .push(format!("  {} - {}", t.name(), t.description()));
+                app.log(format!("  {} - {}", t.name(), t.description()));
             }
             return CommandResult::Ok;
         };
 
         // Check if already running a tool
         if app.active_tool.is_some() {
-            app.logs
-                .push("A tool is already running. Wait for it to complete.".into());
+            app.log("A tool is already running. Wait for it to complete.");
             return CommandResult::Ok;
         }
 
         // Check if tool can run on this target
         if let Err(msg) = tool.can_run(app, &target) {
-            app.logs.push(msg);
+            app.log(msg);
             return CommandResult::Ok;
         }
 

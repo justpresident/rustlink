@@ -8,7 +8,7 @@ pub struct App {
     pub connection_path: Vec<String>,
     pub trace_percentage: f64,
     pub is_tracing: bool,
-    pub logs: Vec<String>,
+    logs: Vec<String>,
     pub input: String,
     pub last_tick: Instant,
     pub should_quit: bool,
@@ -181,6 +181,23 @@ impl App {
         }
     }
 
+    pub fn log<S: AsRef<str>>(&mut self, stringlike: S) {
+        let str_ref = stringlike.as_ref();
+        self.logs.push(str_ref.to_string());
+    }
+
+    pub fn logs(&self) -> &[String] {
+        &self.logs
+    }
+
+    pub fn logs_len(&self) -> usize {
+        self.logs.len()
+    }
+
+    pub fn clear_logs(&mut self) {
+        self.logs.clear();
+    }
+
     pub fn on_tick(&mut self, tool_registry: &crate::tools::ToolRegistry) {
         // Handle Tool Progress
         let tool_info = self.active_tool.as_ref().map(|active| {
@@ -209,8 +226,7 @@ impl App {
             if self.trace_percentage < 100.0 {
                 self.trace_percentage += self.trace_speed();
             } else {
-                self.logs
-                    .push("!!! TERMINAL COMPROMISED - DISCONNECTING !!!".into());
+                self.log("!!! TERMINAL COMPROMISED - DISCONNECTING !!!");
                 self.reset_connection();
             }
         }
@@ -284,12 +300,17 @@ impl App {
     }
 
     pub fn check_missions(&mut self, filename: &str) {
+        // Collect rewards first to avoid borrow issues
+        let mut completed_rewards = Vec::new();
         for m in self.missions.iter_mut() {
             if !m.is_complete && m.target_file == filename {
                 m.is_complete = true;
                 self.credits += m.reward;
-                self.logs.push(format!("MISSION COMPLETE: +{}c", m.reward));
+                completed_rewards.push(m.reward);
             }
+        }
+        for reward in completed_rewards {
+            self.log(format!("MISSION COMPLETE: +{}c", reward));
         }
     }
 
@@ -415,8 +436,7 @@ impl App {
             self.apply_single_completion(&completions[0]);
         } else {
             // Multiple matches - show them and apply common prefix
-            self.logs
-                .push(format!("Completions: {}", completions.join(" ")));
+            self.log(format!("Completions: {}", completions.join(" ")));
             if let Some(common) = Self::common_prefix(&completions) {
                 self.apply_single_completion(&common);
             }

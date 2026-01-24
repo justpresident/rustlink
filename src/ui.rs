@@ -157,16 +157,16 @@ pub fn render(f: &mut Frame, app: &mut App, registry: &CommandRegistry) {
     // Calculate how many lines fit in the logs area (height - 2 for borders)
     let logs_height = hud_chunks[0].height.saturating_sub(2) as usize;
     // Clamp scroll to valid range
-    let max_scroll = app.logs.len().saturating_sub(logs_height);
+    let max_scroll = app.logs_len().saturating_sub(logs_height);
     if app.log_scroll > max_scroll {
         app.log_scroll = max_scroll;
     }
     // Calculate the range of logs to show based on scroll position
-    let end_index = app.logs.len().saturating_sub(app.log_scroll);
+    let end_index = app.logs_len().saturating_sub(app.log_scroll);
     let start_index = end_index.saturating_sub(logs_height);
-    let logs_to_show: Vec<ListItem> = app.logs[start_index..end_index]
+    let logs_to_show: Vec<ListItem> = app.logs()[start_index..end_index]
         .iter()
-        .map(|l| ListItem::new(l.as_str()))
+        .map(|l: &String| ListItem::new(l.as_str()))
         .collect();
     let scroll_indicator = if app.log_scroll > 0 {
         format!(" LOGS [+{}] ", app.log_scroll)

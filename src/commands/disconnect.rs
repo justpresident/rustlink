@@ -18,7 +18,7 @@ impl Command for DisconnectCommand {
 
     fn execute(&self, app: &mut App, _args: &[&str], _registry: &CommandRegistry) -> CommandResult {
         if app.target_ip.is_some() {
-            app.logs.push("Disconnected.".into());
+            app.log("Disconnected.");
         }
         app.connection_path = vec!["127.0.0.1".into()];
         app.target_ip = None;

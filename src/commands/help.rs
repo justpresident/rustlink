@@ -18,7 +18,7 @@ impl Command for HelpCommand {
     }
 
     fn execute(&self, app: &mut App, _args: &[&str], registry: &CommandRegistry) -> CommandResult {
-        app.logs.push("Available commands:".into());
+        app.log("Available commands:");
 
         // Dynamically generate help from all registered commands
         let mut max_usage_len = 0;
@@ -35,7 +35,7 @@ impl Command for HelpCommand {
             } else {
                 format!(" ({})", aliases.join(", "))
             };
-            app.logs.push(format!(
+            app.log(format!(
                 "  {}{}- {}{}",
                 usage,
                 padding,
@@ -62,16 +62,15 @@ impl Command for HelpKeysCommand {
     }
 
     fn execute(&self, app: &mut App, _args: &[&str], _registry: &CommandRegistry) -> CommandResult {
-        app.logs.push("".into());
-        app.logs.push("Keyboard shortcuts:".into());
-        app.logs.push("  Tab              - Autocomplete".into());
-        app.logs.push("  Up/Down          - log history".into());
-        app.logs.push("  PageUp/PageDown  - command history".into());
-        app.logs
-            .push("  Ctrl+A/E         - Start/End of line".into());
-        app.logs.push("  Ctrl+U           - Clear line".into());
-        app.logs.push("  Ctrl+W           - Delete word".into());
-        app.logs.push("  Ctrl+Q           - Quit".into());
+        app.log("");
+        app.log("Keyboard shortcuts:");
+        app.log("  Tab              - Autocomplete");
+        app.log("  Up/Down          - log history");
+        app.log("  PageUp/PageDown  - command history");
+        app.log("  Ctrl+A/E         - Start/End of line");
+        app.log("  Ctrl+U           - Clear line");
+        app.log("  Ctrl+W           - Delete word");
+        app.log("  Ctrl+Q           - Quit");
         CommandResult::Ok
     }
 }

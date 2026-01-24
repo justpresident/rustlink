@@ -24,26 +24,31 @@ impl Command for LsCommand {
             if let Some(firewall) = &server.firewall
                 && firewall.is_active
             {
-                app.logs
-                    .push("Access Denied: Firewall active. Run FirewallBuster first.".into());
+                app.log("Access Denied: Firewall active. Run FirewallBuster first.");
                 return CommandResult::Ok;
             }
 
             if server.is_locked {
-                app.logs
-                    .push("Access Denied: Server Locked. Run PasswordBreaker first.".into());
+                app.log("Access Denied: Server Locked. Run PasswordBreaker first.");
             } else if server.fs.files.is_empty() {
-                app.logs.push("No files found.".into());
+                app.log("No files found.");
             } else {
-                app.logs.push(format!("Files on {}:", server.name));
-                for file in &server.fs.files {
-                    app.logs
-                        .push(format!("  {} ({} bytes)", file.name, file.size));
+                // Collect file info first to avoid borrow issues
+                let server_name = server.name.clone();
+                let file_info: Vec<_> = server
+                    .fs
+                    .files
+                    .iter()
+                    .map(|f| (f.name.clone(), f.size))
+                    .collect();
+
+                app.log(format!("Files on {}:", server_name));
+                for (name, size) in file_info {
+                    app.log(format!("  {} ({} bytes)", name, size));
                 }
             }
         } else {
-            app.logs
-                .push("Not connected to any server. Use 'connect <ip>' first.".into());
+            app.log("Not connected to any server. Use 'connect <ip>' first.");
         }
         CommandResult::Ok
     }
@@ -70,12 +75,12 @@ impl Command for ScpCommand {
 
     fn execute(&self, app: &mut App, args: &[&str], _registry: &CommandRegistry) -> CommandResult {
         let Some(&filename) = args.first() else {
-            app.logs.push("Usage: scp <filename>".into());
+            app.log("Usage: scp <filename>");
             return CommandResult::Ok;
         };
 
         let Some(target) = app.target_ip.clone() else {
-            app.logs.push("Not connected to any server.".into());
+            app.log("Not connected to any server.");
             return CommandResult::Ok;
         };
 
@@ -85,22 +90,21 @@ impl Command for ScpCommand {
         if let Some(firewall) = &server.firewall
             && firewall.is_active
         {
-            app.logs.push("Access Denied: Firewall active.".into());
+            app.log("Access Denied: Firewall active.");
             return CommandResult::Ok;
         }
 
         if server.is_locked {
-            app.logs.push("Access Denied: Server Locked.".into());
+            app.log("Access Denied: Server Locked.");
             return CommandResult::Ok;
         }
 
         if let Some(file) = server.fs.files.iter().find(|f| f.name == filename) {
             app.local_files.push(file.clone());
-            app.logs
-                .push(format!("Downloaded '{}' ({} bytes)", filename, file.size));
+            app.log(format!("Downloaded '{}' ({} bytes)", filename, file.size));
             app.check_missions(filename);
         } else {
-            app.logs.push(format!("File '{}' not found.", filename));
+            app.log(format!("File '{}' not found.", filename));
         }
 
         CommandResult::Ok
