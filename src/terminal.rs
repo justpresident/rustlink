@@ -27,7 +27,7 @@ impl Terminal {
         &self.logs
     }
 
-    pub fn logs_len(&self) -> usize {
+    pub const fn logs_len(&self) -> usize {
         self.logs.len()
     }
 
@@ -35,15 +35,15 @@ impl Terminal {
         self.logs.clear();
     }
 
-    pub fn scroll_logs_up(&mut self, amount: usize) {
+    pub const fn scroll_logs_up(&mut self, amount: usize) {
         self.log_scroll = self.log_scroll.saturating_add(amount);
     }
 
-    pub fn scroll_logs_down(&mut self, amount: usize) {
+    pub const fn scroll_logs_down(&mut self, amount: usize) {
         self.log_scroll = self.log_scroll.saturating_sub(amount);
     }
 
-    pub fn scroll_logs_to_bottom(&mut self) {
+    pub const fn scroll_logs_to_bottom(&mut self) {
         self.log_scroll = 0;
     }
 
@@ -67,23 +67,23 @@ impl Terminal {
         }
     }
 
-    pub fn move_cursor_left(&mut self) {
+    pub const fn move_cursor_left(&mut self) {
         if self.cursor_pos > 0 {
             self.cursor_pos -= 1;
         }
     }
 
-    pub fn move_cursor_right(&mut self) {
+    pub const fn move_cursor_right(&mut self) {
         if self.cursor_pos < self.input.len() {
             self.cursor_pos += 1;
         }
     }
 
-    pub fn move_cursor_start(&mut self) {
+    pub const fn move_cursor_start(&mut self) {
         self.cursor_pos = 0;
     }
 
-    pub fn move_cursor_end(&mut self) {
+    pub const fn move_cursor_end(&mut self) {
         self.cursor_pos = self.input.len();
     }
 
@@ -148,7 +148,7 @@ impl Terminal {
         self.history_index = None;
     }
 
-    pub fn apply_completions(&mut self, completions: Vec<String>) {
+    pub fn apply_completions(&mut self, completions: &[String]) {
         if completions.is_empty() {
             return;
         }
@@ -157,7 +157,7 @@ impl Terminal {
             self.apply_single_completion(&completions[0]);
         } else {
             self.log(format!("Completions: {}", completions.join(" ")));
-            if let Some(common) = Self::common_prefix(&completions) {
+            if let Some(common) = Self::common_prefix(completions) {
                 self.apply_single_completion(&common);
             }
         }
@@ -204,8 +204,7 @@ impl Terminal {
                 first[..first
                     .char_indices()
                     .nth(prefix_len)
-                    .map(|(i, _)| i)
-                    .unwrap_or(first.len())]
+                    .map_or(first.len(), |(i, _)| i)]
                     .to_string(),
             )
         } else {

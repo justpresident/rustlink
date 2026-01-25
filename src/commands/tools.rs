@@ -41,7 +41,7 @@ impl Command for RunCommand {
 
         // Find the tool in the registry
         let Some(tool) = tool_registry.find(tool_name) else {
-            app.log(format!("Tool '{}' not found.", tool_name));
+            app.log(format!("Tool '{tool_name}' not found."));
             app.log("Available tools:");
             for t in tool_registry.all() {
                 app.log(format!("  {} - {}", t.name(), t.description()));

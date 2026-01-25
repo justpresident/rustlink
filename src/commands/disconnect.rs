@@ -26,13 +26,13 @@ impl Command for DisconnectCommand {
         }
         app.connection.reset();
 
-        if old_server_type != new_server_type {
+        if old_server_type == new_server_type {
+            CommandResult::Ok
+        } else {
             CommandResult::ConnectionChanged {
                 old_server_type,
                 new_server_type,
             }
-        } else {
-            CommandResult::Ok
         }
     }
 }

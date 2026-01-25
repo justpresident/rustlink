@@ -67,7 +67,7 @@ impl ToolRegistry {
         self.tools
             .iter()
             .find(|t| t.name() == name)
-            .map(|b| b.as_ref())
+            .map(std::convert::AsRef::as_ref)
     }
 
     /// Get all registered tools
@@ -86,7 +86,7 @@ impl ToolRegistry {
             .iter()
             .map(|t| t.name())
             .filter(|name| name.starts_with(prefix))
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .collect()
     }
 }

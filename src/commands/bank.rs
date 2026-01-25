@@ -53,8 +53,7 @@ impl Command for AccountInfoCommand {
             .find(|a| a.account_number == *account_number)
         else {
             app.log(format!(
-                "Error: Account {} not found on this server.",
-                account_number
+                "Error: Account {account_number} not found on this server."
             ));
             return CommandResult::Ok;
         };
@@ -64,9 +63,9 @@ impl Command for AccountInfoCommand {
         let owner = account.owner.clone();
         let balance = account.balance;
 
-        app.log(format!("--- Account Info for {} ---", account_num));
-        app.log(format!("Owner: {}", owner));
-        app.log(format!("Balance: {}c", balance));
+        app.log(format!("--- Account Info for {account_num} ---"));
+        app.log(format!("Owner: {owner}"));
+        app.log(format!("Balance: {balance}c"));
         app.log("----------------------------");
 
         CommandResult::Ok
@@ -135,8 +134,7 @@ impl Command for TransferCommand {
                 return log_and_return(
                     app,
                     &format!(
-                        "Error: Sender account {} not found on this server.",
-                        from_account_number
+                        "Error: Sender account {from_account_number} not found on this server."
                     ),
                 );
             };
@@ -148,8 +146,7 @@ impl Command for TransferCommand {
                 return log_and_return(
                     app,
                     &format!(
-                        "Error: Receiver account {} not found on this server.",
-                        to_account_number
+                        "Error: Receiver account {to_account_number} not found on this server."
                     ),
                 );
             };
@@ -170,8 +167,7 @@ impl Command for TransferCommand {
                 return log_and_return(
                     app,
                     &format!(
-                        "Error: Insufficient funds in account {}.",
-                        from_account_number
+                        "Error: Insufficient funds in account {from_account_number}."
                     ),
                 );
             }

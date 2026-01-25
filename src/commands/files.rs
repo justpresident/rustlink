@@ -42,9 +42,9 @@ impl Command for LsCommand {
                     .map(|f| (f.name.clone(), f.size))
                     .collect();
 
-                app.log(format!("Files on {}:", server_name));
+                app.log(format!("Files on {server_name}:"));
                 for (name, size) in file_info {
-                    app.log(format!("  {} ({} bytes)", name, size));
+                    app.log(format!("  {name} ({size} bytes)"));
                 }
             }
         } else {
@@ -103,10 +103,10 @@ impl Command for ScpCommand {
             let file_clone = file.clone();
             let size = file.size;
             app.player.add_file(file_clone);
-            app.log(format!("Downloaded '{}' ({} bytes)", filename, size));
+            app.log(format!("Downloaded '{filename}' ({size} bytes)"));
             app.check_missions(filename);
         } else {
-            app.log(format!("File '{}' not found.", filename));
+            app.log(format!("File '{filename}' not found."));
         }
 
         CommandResult::Ok

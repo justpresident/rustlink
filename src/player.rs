@@ -60,14 +60,14 @@ impl Player {
         self.local_files.push(file);
     }
 
-    pub fn penalize(&mut self, amount: u32) {
+    pub const fn penalize(&mut self, amount: u32) {
         self.credits = self.credits.saturating_sub(amount);
     }
 
     /// Check and complete missions for a downloaded file, returns list of rewards
     pub fn check_missions(&mut self, filename: &str) -> Vec<u32> {
         let mut rewards = Vec::new();
-        for m in self.missions.iter_mut() {
+        for m in &mut self.missions {
             if !m.is_complete && m.target_file == filename {
                 m.is_complete = true;
                 self.credits += m.reward;

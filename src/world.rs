@@ -137,7 +137,6 @@ impl GameWorld {
     pub fn is_server_illegal(&self, ip: &str) -> bool {
         self.servers
             .get(ip)
-            .map(|s| s.is_locked || s.firewall.is_some())
-            .unwrap_or(false)
+            .is_some_and(|s| s.is_locked || s.firewall.is_some())
     }
 }

@@ -43,12 +43,10 @@ pub enum ServerType {
 }
 
 impl ServerType {
-    pub fn associated_commands(&self) -> &'static [&'static str] {
+    pub const fn associated_commands(&self) -> &'static [&'static str] {
         match self {
-            ServerType::Home => &[],      // Example: Home might have basic file ops
-            ServerType::PublicDNS => &[], // Public DNS might have no special commands
-            ServerType::Bank => &["account_info", "transfer"], // Bank has file ops and bank commands
-            ServerType::Data => &[],                           // Data servers have file ops
+            Self::Bank => &["account_info", "transfer"],
+            Self::Home | Self::PublicDNS | Self::Data => &[],
         }
     }
 }
@@ -75,7 +73,7 @@ pub struct Server {
 
 impl Server {
     /// Returns true if connecting to this server triggers a trace
-    pub fn is_illegal(&self) -> bool {
+    pub const fn is_illegal(&self) -> bool {
         self.is_locked || self.firewall.is_some()
     }
 }

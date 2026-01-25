@@ -30,11 +30,10 @@ impl Tool for FirewallBuster {
             .world
             .get(target_ip)
             .and_then(|s| s.firewall.as_ref())
-            .map(|fw| fw.strength)
-            .unwrap_or(50);
+            .map_or(50, |fw| fw.strength);
 
         // Base speed of 3.0, reduced by strength (strength 100 = 0.5, strength 0 = 3.0)
-        let speed = 3.0 - (strength as f64 / 100.0 * 2.5);
+        let speed = (f64::from(strength) / 100.0).mul_add(-2.5, 3.0);
         (current_progress + speed).min(100.0)
     }
 
@@ -43,7 +42,7 @@ impl Tool for FirewallBuster {
             && let Some(firewall) = &mut server.firewall
         {
             firewall.is_active = false;
-            app.log(format!("SUCCESS: Firewall disabled on {}", target_ip));
+            app.log(format!("SUCCESS: Firewall disabled on {target_ip}"));
         }
     }
 }

@@ -123,9 +123,9 @@ impl CommandRegistry {
     pub fn activate_commands(&mut self, names: &[&str]) {
         for name in names {
             if self.master_commands.contains_key(*name)
-                && !self.active_command_names.contains(&name.to_string())
+                && !self.active_command_names.contains(&(*name).to_string())
             {
-                self.active_command_names.push(name.to_string());
+                self.active_command_names.push((*name).to_string());
             }
         }
     }
@@ -160,7 +160,7 @@ impl CommandRegistry {
     pub fn all_active(&self) -> Vec<&dyn Command> {
         self.active_command_names
             .iter()
-            .filter_map(|name| self.master_commands.get(name).map(|cmd| cmd.as_ref()))
+            .filter_map(|name| self.master_commands.get(name).map(std::convert::AsRef::as_ref))
             .collect()
     }
 
@@ -175,8 +175,7 @@ impl CommandRegistry {
             cmd_trait_obj.execute(app, args, &*self)
         } else {
             app.log(format!(
-                "Error: Internal - Attempted to execute unknown active command '{}'",
-                cmd_name
+                "Error: Internal - Attempted to execute unknown active command '{cmd_name}'"
             ));
             CommandResult::Ok
         }
@@ -192,7 +191,7 @@ impl CommandRegistry {
                 }
                 for alias in cmd.aliases() {
                     if alias.starts_with(prefix) {
-                        completions.push(alias.to_string());
+                        completions.push((*alias).to_string());
                     }
                 }
             }
@@ -223,8 +222,7 @@ pub fn execute_input(registry: &mut CommandRegistry, app: &mut App) -> CommandRe
         registry.execute_command_by_name(app, &canonical_name, args)
     } else {
         app.log(format!(
-            "Unknown command: {}. Type 'help' for available commands.",
-            cmd_name
+            "Unknown command: {cmd_name}. Type 'help' for available commands."
         ));
         CommandResult::Ok
     }

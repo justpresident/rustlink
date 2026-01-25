@@ -1,7 +1,23 @@
 use ratatui::{
     prelude::{Color, Constraint, Direction, Frame, Layout, Rect, Style, Stylize},
-    widgets::{canvas::*, *},
+    widgets::{canvas::{Canvas, Map, MapResolution, Line}, Paragraph, Block, Borders, Gauge, ListItem, List},
 };
+use std::fmt::Write;
+
+/// Convert a percentage (0.0-100.0) to u16 for gauge widgets
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+const fn percent_to_u16(value: f64) -> u16 {
+    if value < 0.0 {
+        0
+    } else if value > 100.0 {
+        100
+    } else {
+        value as u16
+    }
+}
 use std::collections::HashMap;
 
 use crate::app::App;
@@ -61,10 +77,11 @@ fn render_bank_panel(f: &mut Frame, area: Rect, server: &Server) {
     } else if let Some(accounts) = &server.accounts {
         info_text.push_str("--- ACCOUNTS ---\n");
         for account in accounts {
-            info_text.push_str(&format!(
-                "  {} ({}) : {}c\n",
+            let _ = writeln!(
+                info_text,
+                "  {} ({}) : {}c",
                 account.account_number, account.owner, account.balance
-            ));
+            );
         }
         info_text.push_str("----------------");
     } else {
@@ -100,8 +117,7 @@ fn render_system_status(f: &mut Frame, area: Rect, app: &App, registry: &Command
         .target_ip
         .as_ref()
         .and_then(|ip| app.world.servers.get(ip))
-        .map(|server| server.name.as_str())
-        .unwrap_or("None");
+        .map_or("None", |server| server.name.as_str());
 
     let firewall_status = app
         .connection
@@ -109,18 +125,20 @@ fn render_system_status(f: &mut Frame, area: Rect, app: &App, registry: &Command
         .as_ref()
         .and_then(|ip| app.world.servers.get(ip))
         .and_then(|server| server.firewall.as_ref())
-        .map(|fw| {
-            if fw.is_active {
-                format!("ACTIVE ({})", fw.strength)
-            } else {
-                "DISABLED".to_string()
-            }
-        })
-        .unwrap_or_else(|| "N/A".to_string());
+        .map_or_else(
+            || "N/A".to_string(),
+            |fw| {
+                if fw.is_active {
+                    format!("ACTIVE ({})", fw.strength)
+                } else {
+                    "DISABLED".to_string()
+                }
+            },
+        );
 
     let unread_mail_count = app.player.unread_mail_count();
     let mail_status = if unread_mail_count > 0 {
-        format!("{} NEW", unread_mail_count)
+        format!("{unread_mail_count} NEW")
     } else {
         "None".to_string()
     };
@@ -195,7 +213,7 @@ pub fn render(
                 Color::Yellow
             }),
         )
-        .percent(app.connection.trace_percentage as u16);
+        .percent(percent_to_u16(app.connection.trace_percentage));
     f.render_widget(gauge, main_layout[0]);
 
     // 2. Interaction Layer (Map + Info Panels)
@@ -353,7 +371,7 @@ fn render_bottom_hud(f: &mut Frame, area: Rect, app: &mut App) {
                     .borders(Borders::ALL),
             )
             .gauge_style(Style::default().fg(Color::Magenta))
-            .percent(active_tool.progress as u16);
+            .percent(percent_to_u16(active_tool.progress));
         f.render_widget(tool_gauge, hud_chunks[1]);
     } else {
         let mission_items: Vec<ListItem> = app
@@ -380,7 +398,7 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
         area,
     );
     // Clamp cursor position to stay within the input area bounds
-    let cursor_x =
-        (area.x + 3 + app.terminal.cursor_pos as u16).min(area.x + area.width.saturating_sub(2));
+    let cursor_pos_u16 = u16::try_from(app.terminal.cursor_pos).expect("cursor_pos exceeds u16::MAX");
+    let cursor_x = (area.x + 3 + cursor_pos_u16).min(area.x + area.width.saturating_sub(2));
     f.set_cursor_position((cursor_x, area.y + 1));
 }

@@ -75,7 +75,7 @@ impl App {
     pub fn check_missions(&mut self, filename: &str) {
         let rewards = self.player.check_missions(filename);
         for reward in rewards {
-            self.terminal.log(format!("MISSION COMPLETE: +{}c", reward));
+            self.terminal.log(format!("MISSION COMPLETE: +{reward}c"));
         }
     }
 }

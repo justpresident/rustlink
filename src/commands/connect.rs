@@ -29,26 +29,26 @@ impl Command for ConnectCommand {
         };
 
         if app.connection.is_in_path(ip) {
-            app.log(format!("Error: Already connected through {}", ip));
+            app.log(format!("Error: Already connected through {ip}"));
             return CommandResult::Ok;
         }
 
         let Some(server) = app.world.get(ip) else {
-            app.log(format!("Error: Unknown IP {}", ip));
+            app.log(format!("Error: Unknown IP {ip}"));
             return CommandResult::Ok;
         };
 
         let new_server_type = Some(server.server_type.clone());
         app.connection.connect_to(server);
-        app.log(format!("Connected to {}", ip));
+        app.log(format!("Connected to {ip}"));
 
-        if old_server_type != new_server_type {
+        if old_server_type == new_server_type {
+            CommandResult::Ok
+        } else {
             CommandResult::ConnectionChanged {
                 old_server_type,
                 new_server_type,
             }
-        } else {
-            CommandResult::Ok
         }
     }
 

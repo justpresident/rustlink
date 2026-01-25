@@ -57,8 +57,7 @@ impl Connection {
         self.path.iter().position(|ip| {
             servers
                 .get(ip)
-                .map(|s| s.is_locked || s.firewall.is_some())
-                .unwrap_or(false)
+                .is_some_and(|s| s.is_locked || s.firewall.is_some())
         })
     }
 
@@ -70,8 +69,7 @@ impl Connection {
 
         let end_index = self
             .first_illegal_index(servers)
-            .map(|i| i + 1)
-            .unwrap_or(self.path.len());
+            .map_or(self.path.len(), |i| i + 1);
         let relevant_path = &self.path[..end_index];
 
         let mut total_distance = 0.0;
@@ -83,7 +81,7 @@ impl Connection {
                 let (x2, y2) = server_b.coords;
                 let dx = x2 - x1;
                 let dy = y2 - y1;
-                total_distance += (dx * dx + dy * dy).sqrt();
+                total_distance += dx.hypot(dy);
             }
         }
         total_distance
@@ -95,7 +93,8 @@ impl Connection {
         let hop_count = self.first_illegal_index(servers).unwrap_or(0);
         let distance = self.connection_distance(servers);
 
-        let hop_factor = 1.0 / (1.0 + hop_count as f64 * 0.4);
+        let hop_count_u32 = u32::try_from(hop_count).expect("hop count exceeds u32::MAX");
+        let hop_factor = 1.0 / f64::from(hop_count_u32).mul_add(0.4, 1.0);
         let distance_factor = 1.0 / (1.0 + distance / 500.0);
 
         base_speed * hop_factor * distance_factor

@@ -39,7 +39,7 @@ impl Tool for PasswordBreaker {
     fn on_complete(&self, app: &mut App, target_ip: &str) {
         if let Some(server) = app.world.get_mut(target_ip) {
             server.is_locked = false;
-            app.log(format!("SUCCESS: Password cracked on {}", target_ip));
+            app.log(format!("SUCCESS: Password cracked on {target_ip}"));
         }
     }
 }

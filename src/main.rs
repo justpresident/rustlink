@@ -73,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
                 // Tab - autocomplete
                 KeyCode::Tab => {
                     let completions = get_completions(&registry, &app, &app.terminal.input);
-                    app.terminal.apply_completions(completions);
+                    app.terminal.apply_completions(&completions);
                 }
                 // Enter - execute command
                 KeyCode::Enter => {
