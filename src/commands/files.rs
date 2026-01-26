@@ -1,4 +1,5 @@
 use super::{Command, CommandResult};
+use crate::missions::{ActionContext, ActionType};
 use crate::{app::App, commands::CommandRegistry};
 
 pub struct LsCommand;
@@ -33,7 +34,6 @@ impl Command for LsCommand {
             } else if server.fs.files.is_empty() {
                 app.log("No files found.");
             } else {
-                // Collect file info first to avoid borrow issues
                 let server_name = server.name.clone();
                 let file_info: Vec<_> = server
                     .fs
@@ -104,7 +104,12 @@ impl Command for ScpCommand {
             let size = file.size;
             app.player.add_file(file_clone);
             app.log(format!("Downloaded '{filename}' ({size} bytes)"));
-            app.check_missions(filename);
+
+            // Process action through mission system
+            let ctx = ActionContext::new(ActionType::FileDownload)
+                .with_server(&target)
+                .with_file(filename);
+            app.process_action(&ctx);
         } else {
             app.log(format!("File '{filename}' not found."));
         }

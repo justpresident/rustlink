@@ -49,6 +49,39 @@ impl Command for RunCommand {
             return CommandResult::Ok;
         };
 
+        // Check if player owns this tool
+        if !app.player.owns_tool(tool.name()) {
+            app.log(format!(
+                "You don't own '{tool_name}'. Purchase it from the shop."
+            ));
+            return CommandResult::Ok;
+        }
+
+        // Check if PC is functional
+        let Some(pc) = app.player.working_pc() else {
+            app.log("Your PC is not functional! Use 'assemble' to complete your build.");
+            return CommandResult::Ok;
+        };
+
+        // Check hardware requirements (using compute power and memory)
+        let min_compute = tool.min_compute_power();
+        let min_memory = tool.min_memory_mb();
+        if !app.player.can_use_tool(min_compute, min_memory) {
+            app.log(format!(
+                "Insufficient hardware. {} requires: {} compute power, {} MB RAM",
+                tool.name(),
+                min_compute,
+                min_memory
+            ));
+            app.log(format!(
+                "Your PC: {} compute power, {} MB RAM",
+                pc.compute_power(),
+                pc.motherboard.total_ram_mb()
+            ));
+            app.log("Upgrade your PC at the shop.");
+            return CommandResult::Ok;
+        }
+
         // Check if already running a tool
         if app.connection.active_tool.is_some() {
             app.log("A tool is already running. Wait for it to complete.");
@@ -69,7 +102,6 @@ impl Command for RunCommand {
     }
 
     fn completions(&self, _app: &App, _arg_index: usize, _prefix: &str) -> Vec<String> {
-        // Basic completions without tool registry access
         Vec::new()
     }
 

@@ -1,6 +1,54 @@
 pub mod firewall;
+pub mod hardware;
+
+pub use hardware::{
+    // Inventory and assembly system
+    AssembledPC,
+    COOLERS,
+    CPUS,
+    ComponentInventory,
+    ComponentSlot,
+    ComponentSlotKind,
+    ComponentSlotType,
+    Cooler,
+    CoolerSlot,
+    CoolerType,
+    Cpu,
+    CpuSlot,
+    CpuSocket,
+    HardwareMaximums,
+    InstallResult,
+    MOTHERBOARDS,
+    Motherboard,
+    MotherboardTier,
+    NETWORKS,
+    NetworkCard,
+    NetworkSlot,
+    NetworkType,
+    OwnedComponent,
+    PC,
+    RAMS,
+    Ram,
+    RamSlot,
+    RamType,
+    STORAGES,
+    Storage,
+    StorageSlot,
+    StorageSlotType,
+    StorageType,
+    find_cooler,
+    find_cpu,
+    find_motherboard,
+    find_network,
+    find_ram,
+    find_storage,
+};
 
 use crate::model::firewall::Firewall;
+
+// ============================================================================
+// File System
+// ============================================================================
 
 #[derive(Debug, Clone)]
 pub struct File {
@@ -14,15 +62,9 @@ pub struct FileSystem {
     pub files: Vec<File>,
 }
 
-#[derive(Debug, Clone)]
-pub struct Mission {
-    pub id: u32,
-    pub description: String,
-    pub target_ip: String,
-    pub target_file: String,
-    pub reward: u32,
-    pub is_complete: bool,
-}
+// ============================================================================
+// Mail System
+// ============================================================================
 
 #[derive(Debug, Clone)]
 pub struct Mail {
@@ -31,7 +73,12 @@ pub struct Mail {
     pub subject: String,
     pub body: String,
     pub is_read: bool,
+    pub mission_id: Option<u32>, // Associated mission ID if this is a mission mail
 }
+
+// ============================================================================
+// Server System
+// ============================================================================
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ServerType {
@@ -39,7 +86,6 @@ pub enum ServerType {
     PublicDNS,
     Bank,
     Data,
-    // Add more as needed
 }
 
 impl ServerType {
@@ -54,7 +100,7 @@ impl ServerType {
 #[derive(Debug, Clone)]
 pub struct Account {
     pub account_number: String,
-    pub balance: i32, // Can be negative for debts
+    pub balance: i32,
     pub owner: String,
 }
 
@@ -68,12 +114,16 @@ pub struct Server {
     pub password: Option<String>,
     pub firewall: Option<Firewall>,
     pub server_type: ServerType,
-    pub accounts: Option<Vec<Account>>, // Only for Bank servers
+    pub accounts: Option<Vec<Account>>,
+    pub logs: Vec<String>,
 }
 
 impl Server {
-    /// Returns true if connecting to this server triggers a trace
     pub const fn is_illegal(&self) -> bool {
         self.is_locked || self.firewall.is_some()
+    }
+
+    pub fn log<S: AsRef<str>>(&mut self, message: S) {
+        self.logs.push(message.as_ref().to_string());
     }
 }

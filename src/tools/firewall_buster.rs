@@ -33,7 +33,14 @@ impl Tool for FirewallBuster {
             .map_or(50, |fw| fw.strength);
 
         // Base speed of 3.0, reduced by strength (strength 100 = 0.5, strength 0 = 3.0)
-        let speed = (f64::from(strength) / 100.0).mul_add(-2.5, 3.0);
+        let base_speed = (f64::from(strength) / 100.0).mul_add(-2.5, 3.0);
+
+        // Hardware bonus based on compute power
+        // Baseline is ~2 compute power for starter PC
+        let compute_power = app.player.compute_power();
+        let speed_multiplier = (f64::from(compute_power) / 2.0).sqrt();
+
+        let speed = base_speed * speed_multiplier;
         (current_progress + speed).min(100.0)
     }
 

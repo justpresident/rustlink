@@ -19,6 +19,16 @@ pub trait Tool: Send + Sync {
     /// Short description for help
     fn description(&self) -> &'static str;
 
+    /// Minimum compute power required to run this tool
+    fn min_compute_power(&self) -> u32 {
+        1
+    }
+
+    /// Minimum memory (MB) required to run this tool
+    fn min_memory_mb(&self) -> u32 {
+        256
+    }
+
     /// Check if the tool can run on the current target
     /// Returns Ok(()) if it can run, Err(message) if not
     fn can_run(&self, app: &App, target_ip: &str) -> Result<(), String>;

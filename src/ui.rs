@@ -1,14 +1,14 @@
 use ratatui::{
     prelude::{Color, Constraint, Direction, Frame, Layout, Rect, Style, Stylize},
-    widgets::{canvas::{Canvas, Map, MapResolution, Line}, Paragraph, Block, Borders, Gauge, ListItem, List},
+    widgets::{
+        Block, Borders, Gauge, List, ListItem, Paragraph, Tabs,
+        canvas::{Canvas, Line, Map, MapResolution},
+    },
 };
 use std::fmt::Write;
 
 /// Convert a percentage (0.0-100.0) to u16 for gauge widgets
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 const fn percent_to_u16(value: f64) -> u16 {
     if value < 0.0 {
         0
@@ -18,11 +18,13 @@ const fn percent_to_u16(value: f64) -> u16 {
         value as u16
     }
 }
+
 use std::collections::HashMap;
 
-use crate::app::App;
+use crate::app::{App, ShopCategory, UIMode};
 use crate::commands::CommandRegistry;
-use crate::model::{Server, ServerType};
+use crate::model::{ComponentSlotKind, MotherboardTier, Server, ServerType};
+use crate::shop::Shop;
 
 /// Function signature for server-specific panel renderers
 type ServerPanelRenderer = fn(&mut Frame, Rect, &Server);
@@ -43,7 +45,6 @@ impl ViewRegistry {
 
     fn register_defaults(&mut self) {
         self.register(ServerType::Bank, render_bank_panel);
-        // Register more server-type views here as needed
     }
 
     pub fn register(&mut self, server_type: ServerType, renderer: ServerPanelRenderer) {
@@ -189,6 +190,15 @@ pub fn render(
     registry: &CommandRegistry,
     view_registry: &ViewRegistry,
 ) {
+    // Check UI mode and render accordingly
+    match app.ui_mode {
+        UIMode::Shop => {
+            render_shop(f, app);
+            return;
+        }
+        UIMode::Normal => {}
+    }
+
     let main_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -257,7 +267,6 @@ struct MapServer {
 }
 
 fn render_world_map(f: &mut Frame, area: Rect, app: &App) {
-    // Extract only the data needed for rendering (avoid cloning entire Server structs)
     let servers: Vec<MapServer> = app
         .world
         .servers
@@ -269,7 +278,6 @@ fn render_world_map(f: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
-    // For the path, we only need coordinates of connected servers
     let path_coords: Vec<(f64, f64)> = app
         .connection
         .path
@@ -374,18 +382,29 @@ fn render_bottom_hud(f: &mut Frame, area: Rect, app: &mut App) {
             .percent(percent_to_u16(active_tool.progress));
         f.render_widget(tool_gauge, hud_chunks[1]);
     } else {
+        // Show active missions from mission system
         let mission_items: Vec<ListItem> = app
-            .player
             .missions
+            .all_active()
             .iter()
             .map(|m| {
-                let status = if m.is_complete { "[DONE]" } else { "[OPEN]" };
-                ListItem::new(format!("{} {} (+{}c)", status, m.description, m.reward))
+                let status = if m.is_complete() {
+                    "[DONE]"
+                } else {
+                    "[ACTIVE]"
+                };
+                ListItem::new(format!("{} {} (+{}c)", status, m.title, m.reward))
             })
             .collect();
+
+        let title = if mission_items.is_empty() {
+            " MISSIONS (none active) "
+        } else {
+            " MISSIONS "
+        };
+
         f.render_widget(
-            List::new(mission_items)
-                .block(Block::default().title(" MISSIONS ").borders(Borders::ALL)),
+            List::new(mission_items).block(Block::default().title(title).borders(Borders::ALL)),
             hud_chunks[1],
         );
     }
@@ -397,8 +416,795 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
             .block(Block::default().borders(Borders::ALL).fg(Color::Yellow)),
         area,
     );
-    // Clamp cursor position to stay within the input area bounds
-    let cursor_pos_u16 = u16::try_from(app.terminal.cursor_pos).expect("cursor_pos exceeds u16::MAX");
+    let cursor_pos_u16 =
+        u16::try_from(app.terminal.cursor_pos).expect("cursor_pos exceeds u16::MAX");
     let cursor_x = (area.x + 3 + cursor_pos_u16).min(area.x + area.width.saturating_sub(2));
     f.set_cursor_position((cursor_x, area.y + 1));
+}
+
+// ============================================================================
+// Shop View - Complete redesign with proper visualization
+// ============================================================================
+
+fn render_shop(f: &mut Frame, app: &App) {
+    use crate::app::ShopTab;
+
+    let main_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Title + tabs
+            Constraint::Min(10),   // Content
+            Constraint::Length(3), // Controls
+        ])
+        .split(f.area());
+
+    // Title and category tabs
+    render_shop_header(f, main_layout[0], app);
+
+    // Content: PC Status (left) + Items (right)
+    // Give more space to the PC visualization
+    let content_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(main_layout[1]);
+
+    render_pc_status_detailed(f, content_layout[0], app);
+    render_shop_items(f, content_layout[1], app);
+
+    // Controls - different based on tab
+    let controls = match app.shop_tab {
+        ShopTab::Available => "Tab: Owned | ←/→: Category | ↑/↓: Select | Enter: Buy | Esc: Exit",
+        ShopTab::Owned => {
+            "Tab: Shop | ←/→: Category | ↑/↓: Select | Enter: Install | Backspace: Uninstall | Esc: Exit"
+        }
+    };
+
+    let can_exit = app.player.pc_functional();
+    let exit_hint = if can_exit {
+        ""
+    } else {
+        " [PC incomplete - cannot exit]"
+    };
+
+    f.render_widget(
+        Paragraph::new(format!("{controls}{exit_hint}"))
+            .style(Style::default().fg(if can_exit {
+                Color::DarkGray
+            } else {
+                Color::Red
+            }))
+            .block(Block::default().borders(Borders::ALL)),
+        main_layout[2],
+    );
+}
+
+fn render_shop_header(f: &mut Frame, area: Rect, app: &App) {
+    use crate::app::ShopTab;
+
+    let titles: Vec<&str> = ShopCategory::all()
+        .iter()
+        .map(super::app::ShopCategory::name)
+        .collect();
+
+    let selected_idx = ShopCategory::all()
+        .iter()
+        .position(|c| *c == app.shop_category)
+        .unwrap_or(0);
+
+    // Title shows current mode
+    let title = match app.shop_tab {
+        ShopTab::Available => " PC SHOP - AVAILABLE ",
+        ShopTab::Owned => " PC SHOP - YOUR INVENTORY ",
+    };
+
+    let tabs = Tabs::new(titles)
+        .block(Block::default().title(title).borders(Borders::ALL))
+        .select(selected_idx)
+        .style(Style::default().fg(Color::White))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        );
+
+    f.render_widget(tabs, area);
+}
+
+fn render_pc_status_detailed(f: &mut Frame, area: Rect, app: &App) {
+    let functional = app.player.pc_functional();
+
+    // Main block
+    let title = if functional {
+        " YOUR PC "
+    } else {
+        " YOUR PC [NOT FUNCTIONAL] "
+    };
+    let border_color = if functional { Color::Cyan } else { Color::Red };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color));
+
+    let inner_area = block.inner(area);
+    f.render_widget(block, area);
+
+    // Inner layout for credits header + PC ASCII art
+    let inner_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Credits line
+            Constraint::Min(1),    // Large PC ASCII art
+        ])
+        .split(inner_area);
+
+    // Credits + inventory count
+    let inv_count = app.player.inventory.total_count();
+    let inv_text = if inv_count > 0 {
+        format!(" | Inventory: {inv_count} parts")
+    } else {
+        String::new()
+    };
+    f.render_widget(
+        Paragraph::new(format!("Credits: {}c{}", app.player.credits, inv_text)).style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        ),
+        inner_layout[0],
+    );
+
+    // Render the large PC ASCII art
+    let pc_lines = render_large_pc_ascii(app);
+    f.render_widget(Paragraph::new(pc_lines), inner_layout[1]);
+}
+
+fn render_shop_items(f: &mut Frame, area: Rect, app: &App) {
+    use crate::app::ShopTab;
+
+    match app.shop_tab {
+        ShopTab::Available => render_shop_available_items(f, area, app),
+        ShopTab::Owned => render_shop_owned_items(f, area, app),
+    }
+}
+
+fn render_shop_available_items(f: &mut Frame, area: Rect, app: &App) {
+    let items = Shop::items_for_category(app.shop_category);
+
+    let block = Block::default()
+        .title(format!(" {} - For Sale ", app.shop_category.name()))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    if items.is_empty() {
+        f.render_widget(
+            Paragraph::new("No items available in this category.").block(block),
+            area,
+        );
+        return;
+    }
+
+    let list_items: Vec<ListItem> = items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let selected = i == app.shop_selection;
+            let prefix = if selected { "▶ " } else { "  " };
+
+            let warnings = Shop::purchase_warnings(&app.player.assembled_pc, item);
+
+            let mut lines = vec![
+                format!("{}{} - {}c", prefix, item.name(), item.price()),
+                format!("    {}", item.description()),
+            ];
+
+            if let Some(socket_info) = item.socket_info() {
+                lines.push(format!("    Socket/Type: {socket_info}"));
+            }
+
+            if !warnings.is_empty() {
+                lines.push(format!("    ⚠ {}", warnings.join("; ")));
+            }
+
+            let text = lines.join("\n");
+
+            let style = if selected {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(ratatui::style::Modifier::BOLD)
+            } else if app.player.credits >= item.price() {
+                if warnings.is_empty() {
+                    Style::default().fg(Color::White)
+                } else {
+                    Style::default().fg(Color::Gray)
+                }
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+
+            ListItem::new(text).style(style)
+        })
+        .collect();
+
+    f.render_widget(List::new(list_items).block(block), area);
+}
+
+fn render_shop_owned_items(f: &mut Frame, area: Rect, app: &App) {
+    let inv = &app.player.inventory;
+    let items = get_inventory_items_for_slot(inv, category_to_slot(app.shop_category));
+
+    let block = Block::default()
+        .title(format!(" {} - Your Inventory ", app.shop_category.name()))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green));
+
+    if items.is_empty() {
+        f.render_widget(
+            Paragraph::new("No items in inventory.\n\nSwitch to Available tab to purchase.")
+                .block(block),
+            area,
+        );
+        return;
+    }
+
+    let list_items: Vec<ListItem> = items
+        .iter()
+        .enumerate()
+        .map(|(i, (id, name, desc))| {
+            let selected = i == app.shop_selection;
+            let prefix = if selected { "▶ " } else { "  " };
+
+            let component =
+                get_component_from_inventory(inv, category_to_slot(app.shop_category), id);
+            let warnings = component
+                .as_ref()
+                .map(|c| app.player.assembled_pc.preview_install(c))
+                .map(|r| r.warnings)
+                .unwrap_or_default();
+
+            let mut text = format!("{prefix}{name}\n    {desc}");
+            if !warnings.is_empty() {
+                use std::fmt::Write;
+                let _ = write!(text, "\n    ⚠ {}", warnings.join("; "));
+            }
+
+            let style = if selected {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(ratatui::style::Modifier::BOLD)
+            } else if warnings.is_empty() {
+                Style::default().fg(Color::White)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+
+            ListItem::new(text).style(style)
+        })
+        .collect();
+
+    f.render_widget(List::new(list_items).block(block), area);
+}
+
+/// Convert `ShopCategory` to `ComponentSlot` for inventory access
+const fn category_to_slot(category: ShopCategory) -> crate::model::ComponentSlot {
+    use crate::model::ComponentSlot;
+    match category {
+        ShopCategory::Cpu => ComponentSlot::Cpu,
+        ShopCategory::Cooler => ComponentSlot::Cooler,
+        ShopCategory::Motherboard => ComponentSlot::Motherboard,
+        ShopCategory::Ram => ComponentSlot::Ram,
+        ShopCategory::Storage => ComponentSlot::Storage,
+        ShopCategory::Network => ComponentSlot::Network,
+    }
+}
+
+// ============================================================================
+// Shop Inventory Helpers
+// ============================================================================
+
+/// Get inventory items for a slot as (id, name, description) tuples
+fn get_inventory_items_for_slot(
+    inv: &crate::model::ComponentInventory,
+    slot: crate::model::ComponentSlot,
+) -> Vec<(&str, &str, String)> {
+    use crate::model::ComponentSlot;
+    let mut items = match slot {
+        ComponentSlot::Cpu => inv
+            .cpus
+            .iter()
+            .map(|c| {
+                (
+                    c.id,
+                    c.name,
+                    format!("{} cores, {} MHz, {}", c.cores, c.max_freq_mhz, c.socket),
+                )
+            })
+            .collect::<Vec<_>>(),
+        ComponentSlot::Cooler => inv
+            .coolers
+            .iter()
+            .map(|c| {
+                (
+                    c.id,
+                    c.name,
+                    format!("{:?}, {} W TDP", c.cooler_type, c.max_tdp),
+                )
+            })
+            .collect(),
+        ComponentSlot::Motherboard => inv
+            .motherboards
+            .iter()
+            .map(|m| {
+                let socket = m
+                    .socket()
+                    .map_or_else(|| "N/A".to_string(), |s| s.to_string());
+                let ram_type = m
+                    .ram_type()
+                    .map_or_else(|| "N/A".to_string(), |r| r.to_string());
+                (m.id, m.name, format!("{socket}, {ram_type}"))
+            })
+            .collect(),
+        ComponentSlot::Ram => inv
+            .rams
+            .iter()
+            .map(|r| (r.id, r.name, format!("{} MB {}", r.capacity_mb, r.ram_type)))
+            .collect(),
+        ComponentSlot::Storage => inv
+            .storage
+            .iter()
+            .map(|s| {
+                (
+                    s.id,
+                    s.name,
+                    format!("{} MB {:?}", s.capacity_mb, s.storage_type),
+                )
+            })
+            .collect(),
+        ComponentSlot::Network => inv
+            .networks
+            .iter()
+            .map(|n| {
+                (
+                    n.id,
+                    n.name,
+                    format!("{:?}, {} Kbps", n.network_type, n.speed_kbps),
+                )
+            })
+            .collect(),
+    };
+    items.sort();
+    items
+}
+
+/// Helper to get a component from inventory by slot and id
+fn get_component_from_inventory(
+    inv: &crate::model::ComponentInventory,
+    slot: crate::model::ComponentSlot,
+    id: &str,
+) -> Option<crate::model::OwnedComponent> {
+    use crate::model::{ComponentSlot, OwnedComponent};
+
+    match slot {
+        ComponentSlot::Cpu => inv
+            .cpus
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| OwnedComponent::Cpu(c.clone())),
+        ComponentSlot::Cooler => inv
+            .coolers
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| OwnedComponent::Cooler(c.clone())),
+        ComponentSlot::Motherboard => inv
+            .motherboards
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| OwnedComponent::Motherboard(m.clone())),
+        ComponentSlot::Ram => inv
+            .rams
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| OwnedComponent::Ram(r.clone())),
+        ComponentSlot::Storage => inv
+            .storage
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| OwnedComponent::Storage(s.clone())),
+        ComponentSlot::Network => inv
+            .networks
+            .iter()
+            .find(|n| n.id == id)
+            .map(|n| OwnedComponent::Network(n.clone())),
+    }
+}
+
+// ============================================================================
+// Large ASCII PC Case Visualization
+// ============================================================================
+
+/// Render a large ASCII art PC case with internal components
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::cognitive_complexity)]
+pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
+    use ratatui::text::{Line, Span};
+
+    let assembled_pc = &app.player.assembled_pc;
+    let mb = assembled_pc.motherboard.as_ref();
+
+    // Colors based on motherboard tier (or default if no motherboard)
+    let (case_color, accent_color, led_color) = mb.map_or(
+        (Color::DarkGray, Color::Gray, Color::DarkGray),
+        |m| match m.tier {
+            MotherboardTier::Basic => (Color::DarkGray, Color::Gray, Color::Gray),
+            MotherboardTier::Standard => (Color::Gray, Color::Blue, Color::Blue),
+            MotherboardTier::Performance => (Color::Cyan, Color::LightCyan, Color::LightCyan),
+            MotherboardTier::Enthusiast => (Color::Yellow, Color::LightYellow, Color::LightRed),
+        },
+    );
+
+    let case_style = Style::default().fg(case_color);
+    let accent_style = Style::default().fg(accent_color);
+    let led_style = Style::default().fg(led_color);
+    let dim_style = Style::default().fg(Color::DarkGray);
+    let cpu_style = Style::default().fg(Color::Cyan);
+    let ram_style = Style::default().fg(Color::Magenta);
+    let storage_style = Style::default().fg(Color::Blue);
+    let net_style = Style::default().fg(Color::Green);
+    let psu_style = Style::default().fg(Color::Yellow);
+
+    // Collect component info
+    let has_mb = mb.is_some();
+    let cpu_filled = mb.is_some_and(|m| m.filled_count(ComponentSlotKind::Cpu) > 0);
+    let cooler_filled = mb.is_some_and(|m| m.filled_count(ComponentSlotKind::Cooler) > 0);
+    let ram_filled = mb.map_or(0, |m| m.filled_count(ComponentSlotKind::Ram));
+    let ram_total = mb.map_or(0, |m| m.slot_count(ComponentSlotKind::Ram));
+    let storage_filled = mb.map_or(0, |m| m.filled_count(ComponentSlotKind::Storage));
+    let storage_total = mb.map_or(0, |m| m.slot_count(ComponentSlotKind::Storage));
+    let net_filled = mb.map_or(0, |m| m.filled_count(ComponentSlotKind::Network));
+    let functional = assembled_pc.is_functional();
+
+    // Get component names for display
+    let cpu_name = assembled_pc
+        .cpu()
+        .map_or_else(|| "Empty".to_string(), |c| c.name.to_string());
+    let cooler_name = assembled_pc
+        .cooler()
+        .map_or_else(|| "None".to_string(), |c| c.name.to_string());
+    let mb_name = mb.map_or_else(|| "No Motherboard".to_string(), |m| m.name.to_string());
+    let socket_name = mb
+        .and_then(crate::model::hardware::Motherboard::socket)
+        .map_or_else(|| "N/A".to_string(), |s| format!("{s}"));
+
+    let mut lines = Vec::new();
+
+    // Power LED indicator
+    let power_led = if functional { "●" } else { "○" };
+    let power_color = if functional { Color::Green } else { Color::Red };
+
+    // Case top with vents
+    lines.push(Line::from(vec![
+        Span::styled("  ╔", case_style),
+        Span::styled("═══════════════════════════════════════", case_style),
+        Span::styled("╗", case_style),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  ║", case_style),
+        Span::styled(" ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ", dim_style),
+        Span::styled("║", case_style),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  ║", case_style),
+        Span::styled(" █                                   █ ", dim_style),
+        Span::styled("║", case_style),
+    ]));
+
+    // Case front with power button and status
+    let hdd_indicator = if storage_filled > 0 { "●" } else { "○" };
+    let activity_led = if functional { "▓▓▓" } else { "░░░" };
+    lines.push(Line::from(vec![
+        Span::styled("  ║", case_style),
+        Span::styled(" █  ", dim_style),
+        Span::styled(power_led.to_string(), Style::default().fg(power_color)),
+        Span::styled(" POWER   ", dim_style),
+        Span::styled(activity_led.to_string(), led_style),
+        Span::styled(" HDD ", dim_style),
+        Span::styled(hdd_indicator.to_string(), storage_style),
+        Span::styled("            █ ", dim_style),
+        Span::styled("║", case_style),
+    ]));
+
+    // Separator
+    lines.push(Line::from(vec![
+        Span::styled("  ║", case_style),
+        Span::styled(" █▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█ ", dim_style),
+        Span::styled("║", case_style),
+    ]));
+
+    // Internal view header
+    lines.push(Line::from(vec![
+        Span::styled("  ║", case_style),
+        Span::styled(" ╔═══════════════════════════════════╗ ", accent_style),
+        Span::styled("║", case_style),
+    ]));
+
+    // Motherboard area
+    if has_mb {
+        // CPU/Cooler section
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║ ", accent_style),
+            Span::styled("┌─────────────┐", cpu_style),
+            Span::styled("  RAM SLOTS      ", dim_style),
+            Span::styled("║ ", accent_style),
+            Span::styled("║", case_style),
+        ]));
+
+        // CPU with cooler visualization
+        let cpu_art = if cooler_filled {
+            "│ ▓▓▓▓▓▓▓▓▓▓▓ │".to_string()
+        } else if cpu_filled {
+            "│ ┌───────┐   │".to_string()
+        } else {
+            "│ │       │   │".to_string()
+        };
+        let cpu_color = if cpu_filled { cpu_style } else { dim_style };
+
+        // RAM slot visualization
+        let mut ram_slots = String::new();
+        for i in 0..4 {
+            if i < ram_total {
+                if i < ram_filled {
+                    ram_slots.push('█');
+                } else {
+                    ram_slots.push('░');
+                }
+            } else {
+                ram_slots.push(' ');
+            }
+            ram_slots.push(' ');
+        }
+        let ram_slots_display = format!("{ram_slots}          ║ ");
+
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║ ", accent_style),
+            Span::styled(cpu_art, cpu_color),
+            Span::styled("  ", dim_style),
+            Span::styled(ram_slots_display.clone(), ram_style),
+            Span::styled("║", case_style),
+        ]));
+
+        // CPU label row
+        let cpu_label = if cooler_filled {
+            "│   COOLER   │".to_string()
+        } else if cpu_filled {
+            "│ │  CPU  │   │".to_string()
+        } else {
+            "│ │ EMPTY │   │".to_string()
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║ ", accent_style),
+            Span::styled(cpu_label, cpu_color),
+            Span::styled("  ", dim_style),
+            Span::styled(ram_slots_display, ram_style),
+            Span::styled("║", case_style),
+        ]));
+
+        // CPU bottom / socket info
+        let socket_display = format!("  {socket_name:<17}║ ");
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║ ", accent_style),
+            Span::styled("└─────────────┘", cpu_style),
+            Span::styled(socket_display, dim_style),
+            Span::styled("║", case_style),
+        ]));
+
+        // Spacer
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║                                   ║ ", accent_style),
+            Span::styled("║", case_style),
+        ]));
+
+        // Storage section header
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║ ", accent_style),
+            Span::styled("STORAGE DRIVES", storage_style),
+            Span::styled("          ", dim_style),
+            Span::styled("NETWORK", net_style),
+            Span::styled("    ║ ", accent_style),
+            Span::styled("║", case_style),
+        ]));
+
+        // Storage drives visualization
+        let mut storage_art = String::new();
+        for i in 0..4 {
+            if i < storage_total {
+                if i < storage_filled {
+                    storage_art.push_str("[▓▓▓]");
+                } else {
+                    storage_art.push_str("[   ]");
+                }
+            }
+        }
+        while storage_art.len() < 20 {
+            storage_art.push(' ');
+        }
+
+        // Network visualization
+        let net_art = if net_filled > 0 {
+            format!("◆{}  ║ ", "─".repeat(6))
+        } else {
+            format!("◇{}  ║ ", "╌".repeat(6))
+        };
+        let net_color = if net_filled > 0 { net_style } else { dim_style };
+
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║ ", accent_style),
+            Span::styled(format!("{storage_art}     "), storage_style),
+            Span::styled(net_art, net_color),
+            Span::styled("║", case_style),
+        ]));
+    } else {
+        // No motherboard installed
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║                                   ║ ", dim_style),
+            Span::styled("║", case_style),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(
+                " ║       NO MOTHERBOARD INSTALLED    ║ ",
+                Style::default().fg(Color::Red),
+            ),
+            Span::styled("║", case_style),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║                                   ║ ", dim_style),
+            Span::styled("║", case_style),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║     Purchase a motherboard to     ║ ", dim_style),
+            Span::styled("║", case_style),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║        begin building your PC     ║ ", dim_style),
+            Span::styled("║", case_style),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║                                   ║ ", dim_style),
+            Span::styled("║", case_style),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║                                   ║ ", dim_style),
+            Span::styled("║", case_style),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║                                   ║ ", dim_style),
+            Span::styled("║", case_style),
+        ]));
+    }
+
+    // Internal view footer
+    lines.push(Line::from(vec![
+        Span::styled("  ║", case_style),
+        Span::styled(" ╚═══════════════════════════════════╝ ", accent_style),
+        Span::styled("║", case_style),
+    ]));
+
+    // PSU section
+    let psu_bar = if functional {
+        "████████████████████████████"
+    } else {
+        "░░░░░░░░░░░░░░░░░░░░░░░░░░░░"
+    };
+    let psu_bar_style = if functional {
+        Style::default().fg(Color::Green)
+    } else {
+        dim_style
+    };
+    lines.push(Line::from(vec![
+        Span::styled("  ║", case_style),
+        Span::styled(" ┌───────────────────────────────────┐ ", psu_style),
+        Span::styled("║", case_style),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  ║", case_style),
+        Span::styled(" │ ", psu_style),
+        Span::styled("PSU ", psu_style),
+        Span::styled(psu_bar.to_string(), psu_bar_style),
+        Span::styled(" │ ", psu_style),
+        Span::styled("║", case_style),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  ║", case_style),
+        Span::styled(" └───────────────────────────────────┘ ", psu_style),
+        Span::styled("║", case_style),
+    ]));
+
+    // Case bottom
+    lines.push(Line::from(vec![
+        Span::styled("  ╚", case_style),
+        Span::styled("═══════════════════════════════════════", case_style),
+        Span::styled("╝", case_style),
+    ]));
+
+    // Component info below case
+    lines.push(Line::from(vec![Span::styled(String::new(), dim_style)]));
+
+    // Motherboard name
+    let mb_display_style = mb.map_or_else(
+        || Style::default().fg(Color::Red),
+        |m| match m.tier {
+            MotherboardTier::Basic => Style::default().fg(Color::DarkGray),
+            MotherboardTier::Standard => Style::default().fg(Color::White),
+            MotherboardTier::Performance => Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+            MotherboardTier::Enthusiast => Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        },
+    );
+    lines.push(Line::from(vec![
+        Span::styled("  MB: ".to_string(), dim_style),
+        Span::styled(mb_name, mb_display_style),
+    ]));
+
+    // CPU name
+    let cpu_display_style = if cpu_filled {
+        cpu_style
+    } else {
+        Style::default().fg(Color::Red)
+    };
+    lines.push(Line::from(vec![
+        Span::styled("  CPU: ".to_string(), dim_style),
+        Span::styled(cpu_name, cpu_display_style),
+    ]));
+
+    // Cooler
+    let cooler_display_style = if cooler_filled {
+        accent_style
+    } else {
+        Style::default().fg(Color::Red)
+    };
+    lines.push(Line::from(vec![
+        Span::styled("  Cooler: ".to_string(), dim_style),
+        Span::styled(cooler_name, cooler_display_style),
+    ]));
+
+    // Status line
+    let status_text = if functional {
+        "SYSTEM READY"
+    } else {
+        "SYSTEM INCOMPLETE"
+    };
+    let status_style = if functional {
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(ratatui::style::Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(Color::Red)
+            .add_modifier(ratatui::style::Modifier::BOLD)
+    };
+    lines.push(Line::from(vec![Span::styled(String::new(), dim_style)]));
+    lines.push(Line::from(vec![
+        Span::styled("  Status: ".to_string(), dim_style),
+        Span::styled(status_text.to_string(), status_style),
+    ]));
+
+    lines
 }

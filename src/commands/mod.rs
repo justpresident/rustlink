@@ -5,6 +5,7 @@ mod files;
 mod help;
 mod mail;
 mod misc;
+mod shop;
 mod tools;
 
 use crate::app::App;
@@ -98,6 +99,7 @@ impl CommandRegistry {
             Box::new(misc::ExitCommand),
             Box::new(files::LsCommand),
             Box::new(files::ScpCommand),
+            Box::new(shop::ShopCommand),
         ];
         for cmd in always_active_cmds {
             self.always_active_command_names
@@ -160,7 +162,11 @@ impl CommandRegistry {
     pub fn all_active(&self) -> Vec<&dyn Command> {
         self.active_command_names
             .iter()
-            .filter_map(|name| self.master_commands.get(name).map(std::convert::AsRef::as_ref))
+            .filter_map(|name| {
+                self.master_commands
+                    .get(name)
+                    .map(std::convert::AsRef::as_ref)
+            })
             .collect()
     }
 

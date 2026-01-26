@@ -59,6 +59,7 @@ impl GameWorld {
                         owner: "Evil Corp".into(),
                     },
                 ]),
+                logs: Vec::new(),
             },
         );
 
@@ -75,6 +76,7 @@ impl GameWorld {
                 firewall: None,
                 server_type: ServerType::Home,
                 accounts: None,
+                logs: Vec::new(),
             },
         );
 
@@ -91,6 +93,7 @@ impl GameWorld {
                 firewall: None,
                 server_type: ServerType::PublicDNS,
                 accounts: None,
+                logs: Vec::new(),
             },
         );
 
@@ -116,6 +119,7 @@ impl GameWorld {
                 }),
                 server_type: ServerType::Data,
                 accounts: None,
+                logs: Vec::new(),
             },
         );
 

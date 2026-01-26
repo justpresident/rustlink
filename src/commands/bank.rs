@@ -166,9 +166,7 @@ impl Command for TransferCommand {
             if from_account.balance < amount {
                 return log_and_return(
                     app,
-                    &format!(
-                        "Error: Insufficient funds in account {from_account_number}."
-                    ),
+                    &format!("Error: Insufficient funds in account {from_account_number}."),
                 );
             }
 

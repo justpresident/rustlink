@@ -31,9 +31,17 @@ impl Tool for PasswordBreaker {
         Ok(())
     }
 
-    fn on_tick(&self, _app: &App, _target_ip: &str, current_progress: f64) -> f64 {
-        // PasswordBreaker runs at moderate speed
-        (current_progress + 2.5).min(100.0)
+    fn on_tick(&self, app: &App, _target_ip: &str, current_progress: f64) -> f64 {
+        // Base speed of 2.0, scaled by compute power
+        // More CPU power = faster cracking
+        let compute_power = app.player.compute_power();
+
+        // Baseline is ~2 compute power for starter PC
+        // Scale so higher compute power gives faster cracking
+        let speed_multiplier = (f64::from(compute_power) / 2.0).sqrt();
+        let speed = 2.0 * speed_multiplier;
+
+        (current_progress + speed).min(100.0)
     }
 
     fn on_complete(&self, app: &mut App, target_ip: &str) {

@@ -20,8 +20,10 @@
 pub mod app;
 pub mod commands;
 pub mod connection;
+pub mod missions;
 pub mod model;
 pub mod player;
+pub mod shop;
 pub mod terminal;
 pub mod tools;
 pub mod ui;

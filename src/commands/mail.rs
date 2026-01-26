@@ -8,16 +8,20 @@ impl MailCommand {
         if app.player.inbox.is_empty() {
             app.log("Inbox is empty.");
         } else {
-            // Collect mail info first to avoid borrow issues
             let mail_lines: Vec<_> = app
                 .player
                 .inbox
                 .iter()
                 .map(|mail| {
                     let status = if mail.is_read { " " } else { "*" };
+                    let job_marker = if mail.mission_id.is_some() {
+                        "[JOB]"
+                    } else {
+                        ""
+                    };
                     format!(
-                        " {} [{}] From: {} - {}",
-                        status, mail.id, mail.sender, mail.subject
+                        " {} [{}] {} From: {} - {}",
+                        status, mail.id, job_marker, mail.sender, mail.subject
                     )
                 })
                 .collect();
@@ -45,17 +49,17 @@ impl MailCommand {
             return;
         };
 
-        // Find and extract mail content first
         let mail_content = app.player.inbox.iter().find(|m| m.id == id).map(|mail| {
             (
                 mail.id,
                 mail.sender.clone(),
                 mail.subject.clone(),
                 mail.body.clone(),
+                mail.mission_id,
             )
         });
 
-        if let Some((mail_id, sender, subject, body)) = mail_content {
+        if let Some((mail_id, sender, subject, body, mission_id)) = mail_content {
             app.log(format!("--- MAIL ID: {mail_id} ---"));
             app.log(format!("From: {sender}"));
             app.log(format!("Subject: {subject}"));
@@ -63,8 +67,11 @@ impl MailCommand {
             for line in body.lines() {
                 app.log(line);
             }
+            if mission_id.is_some() {
+                app.log(" ");
+                app.log(format!("Use 'mail accept {mail_id}' to accept this job."));
+            }
             app.log("-------------------");
-            // Mark as read after logging
             if let Some(mail) = app.player.inbox.iter_mut().find(|m| m.id == id) {
                 mail.is_read = true;
             }
@@ -93,6 +100,25 @@ impl MailCommand {
             app.log(format!("Error: Mail with ID {id} not found."));
         }
     }
+
+    fn accept_mission(app: &mut App, args: &[&str]) {
+        let Some(&id_str) = args.first() else {
+            app.log("Usage: mail accept <mail_id>");
+            return;
+        };
+
+        let Ok(id) = id_str.parse::<u32>() else {
+            app.log("Error: Invalid mail ID.");
+            return;
+        };
+
+        match app.accept_mission_from_mail(id) {
+            Ok(()) => {}
+            Err(msg) => {
+                app.log(format!("Error: {msg}"));
+            }
+        }
+    }
 }
 
 impl Command for MailCommand {
@@ -109,7 +135,7 @@ impl Command for MailCommand {
     }
 
     fn usage(&self) -> &'static str {
-        "mail [read|delete] [id]"
+        "mail [read|delete|accept] [id]"
     }
 
     fn execute(&self, app: &mut App, args: &[&str], _registry: &CommandRegistry) -> CommandResult {
@@ -117,9 +143,10 @@ impl Command for MailCommand {
             None => Self::show_inbox(app),
             Some("read") => Self::read_mail(app, &args[1..]),
             Some("delete") => Self::delete_mail(app, &args[1..]),
+            Some("accept") => Self::accept_mission(app, &args[1..]),
             Some(subcmd) => {
                 app.log(format!("Unknown subcommand: {subcmd}"));
-                app.log("Usage: mail [read|delete] [id]");
+                app.log("Usage: mail [read|delete|accept] [id]");
             }
         }
         CommandResult::Ok
@@ -127,23 +154,18 @@ impl Command for MailCommand {
 
     fn completions(&self, app: &App, arg_index: usize, prefix: &str) -> Vec<String> {
         match arg_index {
-            0 => {
-                // Complete subcommands
-                ["read", "delete"]
-                    .iter()
-                    .filter(|s| s.starts_with(prefix))
-                    .map(|s| (*s).to_string())
-                    .collect()
-            }
-            1 => {
-                // Complete mail IDs
-                app.player
-                    .inbox
-                    .iter()
-                    .map(|m| m.id.to_string())
-                    .filter(|id| id.starts_with(prefix))
-                    .collect()
-            }
+            0 => ["read", "delete", "accept"]
+                .iter()
+                .filter(|s| s.starts_with(prefix))
+                .map(|s| (*s).to_string())
+                .collect(),
+            1 => app
+                .player
+                .inbox
+                .iter()
+                .map(|m| m.id.to_string())
+                .filter(|id| id.starts_with(prefix))
+                .collect(),
             _ => Vec::new(),
         }
     }
