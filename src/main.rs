@@ -2,9 +2,9 @@ use clap::Parser;
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::prelude::{CrosstermBackend, Terminal};
 use rustlink::{
-    app::{App, ShopCategory, ShopTab, UIMode},
+    app::{App, ShopTab, UIMode},
     commands::{CommandRegistry, CommandResult, execute_input, get_completions},
-    model::ComponentSlot,
+    model::HardwareKind,
     shop::Shop,
     ui::{ViewRegistry, render},
 };
@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
                         app.toggle_shop_tab();
                     }
                     KeyCode::Left => {
-                        let categories = ShopCategory::all();
+                        let categories = HardwareKind::all();
                         let current_idx = categories
                             .iter()
                             .position(|c| *c == app.shop_category)
@@ -72,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
                         app.shop_selection = 0;
                     }
                     KeyCode::Right => {
-                        let categories = ShopCategory::all();
+                        let categories = HardwareKind::all();
                         let current_idx = categories
                             .iter()
                             .position(|c| *c == app.shop_category)
@@ -97,8 +97,8 @@ async fn main() -> anyhow::Result<()> {
                     }
                     KeyCode::Backspace if app.shop_tab == ShopTab::Owned => {
                         // Uninstall current component from PC
-                        let slot = category_to_slot(app.shop_category);
-                        if let Some(name) = app.player.uninstall_component(slot) {
+                        let kind = app.shop_category;
+                        if let Some(name) = app.player.uninstall_component(kind) {
                             app.log(format!("Uninstalled {} - moved to inventory", name));
                         }
                     }
@@ -204,33 +204,11 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Convert ShopCategory to ComponentSlot
-fn category_to_slot(category: ShopCategory) -> ComponentSlot {
-    match category {
-        ShopCategory::Cpu => ComponentSlot::Cpu,
-        ShopCategory::Cooler => ComponentSlot::Cooler,
-        ShopCategory::Motherboard => ComponentSlot::Motherboard,
-        ShopCategory::Ram => ComponentSlot::Ram,
-        ShopCategory::Storage => ComponentSlot::Storage,
-        ShopCategory::Network => ComponentSlot::Network,
-    }
-}
-
 /// Get item count for current tab and category
 fn get_item_count(app: &App) -> usize {
     match app.shop_tab {
-        ShopTab::Available => Shop::items_for_category(app.shop_category).len(),
-        ShopTab::Owned => {
-            let inv = &app.player.inventory;
-            match app.shop_category {
-                ShopCategory::Cpu => inv.cpus.len(),
-                ShopCategory::Cooler => inv.coolers.len(),
-                ShopCategory::Motherboard => inv.motherboards.len(),
-                ShopCategory::Ram => inv.rams.len(),
-                ShopCategory::Storage => inv.storage.len(),
-                ShopCategory::Network => inv.networks.len(),
-            }
-        }
+        ShopTab::Available => Shop::count_items_for(app.shop_category),
+        ShopTab::Owned => app.player.inventory.count_items_for(app.shop_category),
     }
 }
 
@@ -239,8 +217,7 @@ fn handle_shop_enter(app: &mut App) {
     match app.shop_tab {
         ShopTab::Available => {
             // Purchase item
-            let items = Shop::items_for_category(app.shop_category);
-            if let Some(item) = items.get(app.shop_selection) {
+            if let Some(item) = Shop::get_at(app.shop_category, app.shop_selection) {
                 match Shop::purchase(&mut app.player, item) {
                     Ok(result) => {
                         app.log(format!(
@@ -259,40 +236,23 @@ fn handle_shop_enter(app: &mut App) {
         }
         ShopTab::Owned => {
             // Install component from inventory
-            let slot = category_to_slot(app.shop_category);
-            let id = get_inventory_id(&app.player.inventory, slot, app.shop_selection);
-            if let Some(id) = id {
-                match app.player.install_from_inventory(slot, &id) {
-                    Ok(warnings) => {
-                        app.log("Component installed");
-                        for w in &warnings {
-                            app.log(format!("  ⚠ {}", w));
-                        }
-                        // Reset selection if needed
-                        let count = get_item_count(app);
-                        if app.shop_selection >= count {
-                            app.shop_selection = count.saturating_sub(1);
-                        }
+            match app
+                .player
+                .install_from_inventory(app.shop_category, app.shop_selection)
+            {
+                Ok(warnings) => {
+                    app.log("Component installed");
+                    for w in &warnings {
+                        app.log(format!("  ⚠ {}", w));
                     }
-                    Err(msg) => app.log(format!("Error: {}", msg)),
+                    // Reset selection if needed
+                    let count = get_item_count(app);
+                    if app.shop_selection >= count {
+                        app.shop_selection = count.saturating_sub(1);
+                    }
                 }
+                Err(msg) => app.log(format!("Error: {}", msg)),
             }
         }
-    }
-}
-
-/// Get the id of an item in inventory at a given index
-fn get_inventory_id(
-    inv: &rustlink::model::ComponentInventory,
-    slot: ComponentSlot,
-    index: usize,
-) -> Option<String> {
-    match slot {
-        ComponentSlot::Cpu => inv.cpus.get(index).map(|c| c.id.to_string()),
-        ComponentSlot::Cooler => inv.coolers.get(index).map(|c| c.id.to_string()),
-        ComponentSlot::Motherboard => inv.motherboards.get(index).map(|m| m.id.to_string()),
-        ComponentSlot::Ram => inv.rams.get(index).map(|r| r.id.to_string()),
-        ComponentSlot::Storage => inv.storage.get(index).map(|s| s.id.to_string()),
-        ComponentSlot::Network => inv.networks.get(index).map(|n| n.id.to_string()),
     }
 }

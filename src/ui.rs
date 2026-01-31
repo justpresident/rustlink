@@ -21,9 +21,9 @@ const fn percent_to_u16(value: f64) -> u16 {
 
 use std::collections::HashMap;
 
-use crate::app::{App, ShopCategory, UIMode};
+use crate::app::{App, UIMode};
 use crate::commands::CommandRegistry;
-use crate::model::{ComponentSlotKind, MotherboardTier, Server, ServerType};
+use crate::model::{HardwareKind, MotherboardTier, Server, ServerType};
 use crate::shop::Shop;
 
 /// Function signature for server-specific panel renderers
@@ -481,12 +481,9 @@ fn render_shop(f: &mut Frame, app: &App) {
 fn render_shop_header(f: &mut Frame, area: Rect, app: &App) {
     use crate::app::ShopTab;
 
-    let titles: Vec<&str> = ShopCategory::all()
-        .iter()
-        .map(super::app::ShopCategory::name)
-        .collect();
+    let titles: Vec<&str> = HardwareKind::all().iter().map(HardwareKind::name).collect();
 
-    let selected_idx = ShopCategory::all()
+    let selected_idx = HardwareKind::all()
         .iter()
         .position(|c| *c == app.shop_category)
         .unwrap_or(0);
@@ -559,28 +556,93 @@ fn render_pc_status_detailed(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Paragraph::new(pc_lines), inner_layout[1]);
 }
 
+/// Item to display in the shop list
+struct ShopDisplayItem {
+    name: String,
+    description: String,
+    price: Option<u32>,
+    socket_info: Option<String>,
+    warnings: Vec<String>,
+    affordable: bool,
+}
+
 fn render_shop_items(f: &mut Frame, area: Rect, app: &App) {
     use crate::app::ShopTab;
 
-    match app.shop_tab {
-        ShopTab::Available => render_shop_available_items(f, area, app),
-        ShopTab::Owned => render_shop_owned_items(f, area, app),
-    }
+    let inv = &app.player.inventory;
+    let kind = app.shop_category;
+
+    // Build display items and configure based on tab
+    let (items, title_suffix, border_color, empty_msg): (Vec<ShopDisplayItem>, _, _, _) =
+        match app.shop_tab {
+            ShopTab::Available => {
+                let items = Shop::items_for(app.shop_category)
+                    .map(|item| ShopDisplayItem {
+                        name: item.name().to_string(),
+                        description: item.description(),
+                        price: Some(item.price()),
+                        socket_info: item.socket_info(),
+                        warnings: Shop::purchase_warnings(&app.player.pc, item),
+                        affordable: app.player.credits >= item.price(),
+                    })
+                    .collect();
+                (
+                    items,
+                    "For Sale",
+                    Color::Cyan,
+                    "No items available in this category.",
+                )
+            }
+            ShopTab::Owned => {
+                let items = inv
+                    .items_for(kind)
+                    .map(|c| ShopDisplayItem {
+                        name: c.name().to_string(),
+                        description: c.description(),
+                        price: None,
+                        socket_info: None,
+                        warnings: app.player.pc.install_warnings(c),
+                        affordable: true,
+                    })
+                    .collect();
+                (
+                    items,
+                    "Your Inventory",
+                    Color::Green,
+                    "No items in inventory.\n\nSwitch to Available tab to purchase.",
+                )
+            }
+        };
+
+    let title = format!(" {} - {} ", app.shop_category.name(), title_suffix);
+    render_shop_list(
+        f,
+        title,
+        area,
+        &items,
+        app.shop_selection,
+        border_color,
+        empty_msg,
+    );
 }
 
-fn render_shop_available_items(f: &mut Frame, area: Rect, app: &App) {
-    let items = Shop::items_for_category(app.shop_category);
-
+/// Generic shop list renderer
+fn render_shop_list(
+    f: &mut Frame,
+    title: String,
+    area: Rect,
+    items: &[ShopDisplayItem],
+    selection: usize,
+    border_color: Color,
+    empty_msg: &str,
+) {
     let block = Block::default()
-        .title(format!(" {} - For Sale ", app.shop_category.name()))
+        .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(border_color));
 
     if items.is_empty() {
-        f.render_widget(
-            Paragraph::new("No items available in this category.").block(block),
-            area,
-        );
+        f.render_widget(Paragraph::new(empty_msg).block(block), area);
         return;
     }
 
@@ -588,234 +650,45 @@ fn render_shop_available_items(f: &mut Frame, area: Rect, app: &App) {
         .iter()
         .enumerate()
         .map(|(i, item)| {
-            let selected = i == app.shop_selection;
-            let prefix = if selected { "▶ " } else { "  " };
+            let selected = i == selection;
 
-            let warnings = Shop::purchase_warnings(&app.player.assembled_pc, item);
+            // Build display text
+            let (lines, style) = get_shop_item_list_lines(selected, item);
 
-            let mut lines = vec![
-                format!("{}{} - {}c", prefix, item.name(), item.price()),
-                format!("    {}", item.description()),
-            ];
-
-            if let Some(socket_info) = item.socket_info() {
-                lines.push(format!("    Socket/Type: {socket_info}"));
-            }
-
-            if !warnings.is_empty() {
-                lines.push(format!("    ⚠ {}", warnings.join("; ")));
-            }
-
-            let text = lines.join("\n");
-
-            let style = if selected {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(ratatui::style::Modifier::BOLD)
-            } else if app.player.credits >= item.price() {
-                if warnings.is_empty() {
-                    Style::default().fg(Color::White)
-                } else {
-                    Style::default().fg(Color::Gray)
-                }
-            } else {
-                Style::default().fg(Color::DarkGray)
-            };
-
-            ListItem::new(text).style(style)
+            ListItem::new(lines.join("\n")).style(style)
         })
         .collect();
 
     f.render_widget(List::new(list_items).block(block), area);
 }
 
-fn render_shop_owned_items(f: &mut Frame, area: Rect, app: &App) {
-    let inv = &app.player.inventory;
-    let items = get_inventory_items_for_slot(inv, category_to_slot(app.shop_category));
-
-    let block = Block::default()
-        .title(format!(" {} - Your Inventory ", app.shop_category.name()))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Green));
-
-    if items.is_empty() {
-        f.render_widget(
-            Paragraph::new("No items in inventory.\n\nSwitch to Available tab to purchase.")
-                .block(block),
-            area,
-        );
-        return;
+fn get_shop_item_list_lines(selected: bool, item: &ShopDisplayItem) -> (Vec<String>, Style) {
+    let prefix = if selected { "▶ " } else { "• " };
+    let mut lines = vec![if let Some(p) = item.price {
+        format!("{p}$ {prefix}{} [{}]", item.name, item.description)
+    } else {
+        format!("{prefix}{} [{}]", item.name, item.description)
+    }];
+    if let Some(ref info) = item.socket_info {
+        lines.push(format!("    Socket/Type: {info}"));
+    }
+    if !item.warnings.is_empty() {
+        lines.push(format!("    ⚠ {}", item.warnings.join("; ")));
     }
 
-    let list_items: Vec<ListItem> = items
-        .iter()
-        .enumerate()
-        .map(|(i, (id, name, desc))| {
-            let selected = i == app.shop_selection;
-            let prefix = if selected { "▶ " } else { "  " };
-
-            let component =
-                get_component_from_inventory(inv, category_to_slot(app.shop_category), id);
-            let warnings = component
-                .as_ref()
-                .map(|c| app.player.assembled_pc.preview_install(c))
-                .map(|r| r.warnings)
-                .unwrap_or_default();
-
-            let mut text = format!("{prefix}{name}\n    {desc}");
-            if !warnings.is_empty() {
-                use std::fmt::Write;
-                let _ = write!(text, "\n    ⚠ {}", warnings.join("; "));
-            }
-
-            let style = if selected {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(ratatui::style::Modifier::BOLD)
-            } else if warnings.is_empty() {
-                Style::default().fg(Color::White)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-
-            ListItem::new(text).style(style)
-        })
-        .collect();
-
-    f.render_widget(List::new(list_items).block(block), area);
-}
-
-/// Convert `ShopCategory` to `ComponentSlot` for inventory access
-const fn category_to_slot(category: ShopCategory) -> crate::model::ComponentSlot {
-    use crate::model::ComponentSlot;
-    match category {
-        ShopCategory::Cpu => ComponentSlot::Cpu,
-        ShopCategory::Cooler => ComponentSlot::Cooler,
-        ShopCategory::Motherboard => ComponentSlot::Motherboard,
-        ShopCategory::Ram => ComponentSlot::Ram,
-        ShopCategory::Storage => ComponentSlot::Storage,
-        ShopCategory::Network => ComponentSlot::Network,
-    }
-}
-
-// ============================================================================
-// Shop Inventory Helpers
-// ============================================================================
-
-/// Get inventory items for a slot as (id, name, description) tuples
-fn get_inventory_items_for_slot(
-    inv: &crate::model::ComponentInventory,
-    slot: crate::model::ComponentSlot,
-) -> Vec<(&str, &str, String)> {
-    use crate::model::ComponentSlot;
-    let mut items = match slot {
-        ComponentSlot::Cpu => inv
-            .cpus
-            .iter()
-            .map(|c| {
-                (
-                    c.id,
-                    c.name,
-                    format!("{} cores, {} MHz, {}", c.cores, c.max_freq_mhz, c.socket),
-                )
-            })
-            .collect::<Vec<_>>(),
-        ComponentSlot::Cooler => inv
-            .coolers
-            .iter()
-            .map(|c| {
-                (
-                    c.id,
-                    c.name,
-                    format!("{:?}, {} W TDP", c.cooler_type, c.max_tdp),
-                )
-            })
-            .collect(),
-        ComponentSlot::Motherboard => inv
-            .motherboards
-            .iter()
-            .map(|m| {
-                let socket = m
-                    .socket()
-                    .map_or_else(|| "N/A".to_string(), |s| s.to_string());
-                let ram_type = m
-                    .ram_type()
-                    .map_or_else(|| "N/A".to_string(), |r| r.to_string());
-                (m.id, m.name, format!("{socket}, {ram_type}"))
-            })
-            .collect(),
-        ComponentSlot::Ram => inv
-            .rams
-            .iter()
-            .map(|r| (r.id, r.name, format!("{} MB {}", r.capacity_mb, r.ram_type)))
-            .collect(),
-        ComponentSlot::Storage => inv
-            .storage
-            .iter()
-            .map(|s| {
-                (
-                    s.id,
-                    s.name,
-                    format!("{} MB {:?}", s.capacity_mb, s.storage_type),
-                )
-            })
-            .collect(),
-        ComponentSlot::Network => inv
-            .networks
-            .iter()
-            .map(|n| {
-                (
-                    n.id,
-                    n.name,
-                    format!("{:?}, {} Kbps", n.network_type, n.speed_kbps),
-                )
-            })
-            .collect(),
+    // Determine style
+    let style = if selected {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(ratatui::style::Modifier::BOLD)
+    } else if !item.affordable {
+        Style::default().fg(Color::DarkGray)
+    } else if item.warnings.is_empty() {
+        Style::default().fg(Color::White)
+    } else {
+        Style::default().fg(Color::Gray)
     };
-    items.sort();
-    items
-}
-
-/// Helper to get a component from inventory by slot and id
-fn get_component_from_inventory(
-    inv: &crate::model::ComponentInventory,
-    slot: crate::model::ComponentSlot,
-    id: &str,
-) -> Option<crate::model::OwnedComponent> {
-    use crate::model::{ComponentSlot, OwnedComponent};
-
-    match slot {
-        ComponentSlot::Cpu => inv
-            .cpus
-            .iter()
-            .find(|c| c.id == id)
-            .map(|c| OwnedComponent::Cpu(c.clone())),
-        ComponentSlot::Cooler => inv
-            .coolers
-            .iter()
-            .find(|c| c.id == id)
-            .map(|c| OwnedComponent::Cooler(c.clone())),
-        ComponentSlot::Motherboard => inv
-            .motherboards
-            .iter()
-            .find(|m| m.id == id)
-            .map(|m| OwnedComponent::Motherboard(m.clone())),
-        ComponentSlot::Ram => inv
-            .rams
-            .iter()
-            .find(|r| r.id == id)
-            .map(|r| OwnedComponent::Ram(r.clone())),
-        ComponentSlot::Storage => inv
-            .storage
-            .iter()
-            .find(|s| s.id == id)
-            .map(|s| OwnedComponent::Storage(s.clone())),
-        ComponentSlot::Network => inv
-            .networks
-            .iter()
-            .find(|n| n.id == id)
-            .map(|n| OwnedComponent::Network(n.clone())),
-    }
+    (lines, style)
 }
 
 // ============================================================================
@@ -828,8 +701,8 @@ fn get_component_from_inventory(
 pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
     use ratatui::text::{Line, Span};
 
-    let assembled_pc = &app.player.assembled_pc;
-    let mb = assembled_pc.motherboard.as_ref();
+    let pc = &app.player.pc;
+    let mb = pc.motherboard.as_ref();
 
     // Colors based on motherboard tier (or default if no motherboard)
     let (case_color, accent_color, led_color) = mb.map_or(
@@ -854,20 +727,20 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
 
     // Collect component info
     let has_mb = mb.is_some();
-    let cpu_filled = mb.is_some_and(|m| m.filled_count(ComponentSlotKind::Cpu) > 0);
-    let cooler_filled = mb.is_some_and(|m| m.filled_count(ComponentSlotKind::Cooler) > 0);
-    let ram_filled = mb.map_or(0, |m| m.filled_count(ComponentSlotKind::Ram));
-    let ram_total = mb.map_or(0, |m| m.slot_count(ComponentSlotKind::Ram));
-    let storage_filled = mb.map_or(0, |m| m.filled_count(ComponentSlotKind::Storage));
-    let storage_total = mb.map_or(0, |m| m.slot_count(ComponentSlotKind::Storage));
-    let net_filled = mb.map_or(0, |m| m.filled_count(ComponentSlotKind::Network));
-    let functional = assembled_pc.is_functional();
+    let cpu_filled = mb.is_some_and(|m| m.filled_count(HardwareKind::Cpu) > 0);
+    let cooler_filled = mb.is_some_and(|m| m.filled_count(HardwareKind::Cooler) > 0);
+    let ram_filled = mb.map_or(0, |m| m.filled_count(HardwareKind::Ram));
+    let ram_total = mb.map_or(0, |m| m.slot_count(HardwareKind::Ram));
+    let storage_filled = mb.map_or(0, |m| m.filled_count(HardwareKind::Storage));
+    let storage_total = mb.map_or(0, |m| m.slot_count(HardwareKind::Storage));
+    let net_filled = mb.map_or(0, |m| m.filled_count(HardwareKind::Network));
+    let functional = pc.is_functional();
 
     // Get component names for display
-    let cpu_name = assembled_pc
+    let cpu_name = pc
         .cpu()
         .map_or_else(|| "Empty".to_string(), |c| c.name.to_string());
-    let cooler_name = assembled_pc
+    let cooler_name = pc
         .cooler()
         .map_or_else(|| "None".to_string(), |c| c.name.to_string());
     let mb_name = mb.map_or_else(|| "No Motherboard".to_string(), |m| m.name.to_string());
@@ -909,7 +782,7 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
         Span::styled(activity_led.to_string(), led_style),
         Span::styled(" HDD ", dim_style),
         Span::styled(hdd_indicator.to_string(), storage_style),
-        Span::styled("            █ ", dim_style),
+        Span::styled("              █ ", dim_style),
         Span::styled("║", case_style),
     ]));
 
@@ -934,7 +807,7 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
             Span::styled("  ║", case_style),
             Span::styled(" ║ ", accent_style),
             Span::styled("┌─────────────┐", cpu_style),
-            Span::styled("  RAM SLOTS      ", dim_style),
+            Span::styled("  RAM SLOTS        ", dim_style),
             Span::styled("║ ", accent_style),
             Span::styled("║", case_style),
         ]));
@@ -963,7 +836,7 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
             }
             ram_slots.push(' ');
         }
-        let ram_slots_display = format!("{ram_slots}          ║ ");
+        let ram_slots_display = format!("{ram_slots}         ║ ");
 
         lines.push(Line::from(vec![
             Span::styled("  ║", case_style),
@@ -976,7 +849,7 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
 
         // CPU label row
         let cpu_label = if cooler_filled {
-            "│   COOLER   │".to_string()
+            "│   COOLER    │".to_string()
         } else if cpu_filled {
             "│ │  CPU  │   │".to_string()
         } else {
@@ -1016,7 +889,7 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
             Span::styled("STORAGE DRIVES", storage_style),
             Span::styled("          ", dim_style),
             Span::styled("NETWORK", net_style),
-            Span::styled("    ║ ", accent_style),
+            Span::styled("   ║ ", accent_style),
             Span::styled("║", case_style),
         ]));
 
@@ -1037,9 +910,9 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
 
         // Network visualization
         let net_art = if net_filled > 0 {
-            format!("◆{}  ║ ", "─".repeat(6))
+            format!("◆{}        ║ ", "─".repeat(6))
         } else {
-            format!("◇{}  ║ ", "╌".repeat(6))
+            format!("◇{}        ║ ", "╌".repeat(6))
         };
         let net_color = if net_filled > 0 { net_style } else { dim_style };
 
@@ -1106,9 +979,9 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
 
     // PSU section
     let psu_bar = if functional {
-        "████████████████████████████"
+        "█████████████████████████████"
     } else {
-        "░░░░░░░░░░░░░░░░░░░░░░░░░░░░"
+        "░░░░░░░░░░░░░░░░░░░░░░░░░░█░░"
     };
     let psu_bar_style = if functional {
         Style::default().fg(Color::Green)

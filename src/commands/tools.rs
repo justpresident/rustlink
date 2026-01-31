@@ -58,15 +58,20 @@ impl Command for RunCommand {
         }
 
         // Check if PC is functional
-        let Some(pc) = app.player.working_pc() else {
+        if !app.player.pc_functional() {
             app.log("Your PC is not functional! Use 'assemble' to complete your build.");
             return CommandResult::Ok;
-        };
+        }
 
         // Check hardware requirements (using compute power and memory)
         let min_compute = tool.min_compute_power();
         let min_memory = tool.min_memory_mb();
         if !app.player.can_use_tool(min_compute, min_memory) {
+            // Get current PC stats (we know PC is functional from check above)
+            let (pc_compute, pc_ram) = app
+                .player
+                .working_motherboard()
+                .map_or((0, 0), |mb| (mb.compute_power(), mb.total_ram_mb()));
             app.log(format!(
                 "Insufficient hardware. {} requires: {} compute power, {} MB RAM",
                 tool.name(),
@@ -74,9 +79,7 @@ impl Command for RunCommand {
                 min_memory
             ));
             app.log(format!(
-                "Your PC: {} compute power, {} MB RAM",
-                pc.compute_power(),
-                pc.motherboard.total_ram_mb()
+                "Your PC: {pc_compute} compute power, {pc_ram} MB RAM"
             ));
             app.log("Upgrade your PC at the shop.");
             return CommandResult::Ok;

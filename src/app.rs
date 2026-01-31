@@ -1,5 +1,6 @@
 use crate::connection::Connection;
 use crate::missions::{ActionContext, ActionType, MissionEffect, MissionSystem};
+use crate::model::HardwareKind;
 use crate::player::Player;
 use crate::terminal::Terminal;
 use crate::world::GameWorld;
@@ -17,118 +18,8 @@ pub enum UIMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ShopTab {
     #[default]
-    Available,
     Owned,
-}
-
-/// A popup dialog for confirmations
-#[derive(Debug, Clone)]
-pub struct Dialog {
-    pub title: String,
-    pub messages: Vec<String>,
-    pub confirm_text: String,
-    pub cancel_text: String,
-    pub on_confirm: DialogAction,
-}
-
-/// What to do when a dialog is confirmed
-#[derive(Debug, Clone)]
-pub enum DialogAction {
-    /// Purchase item at index in current shop category
-    PurchaseItem(usize),
-    /// Install component from inventory (category as slot, component id)
-    InstallComponent(ShopCategory, String),
-    /// Just close the dialog
-    None,
-}
-
-impl Dialog {
-    pub fn purchase_confirmation(item_name: &str, price: u32, warnings: Vec<String>) -> Self {
-        let mut messages = vec![format!("Purchase {} for {}c?", item_name, price)];
-        if !warnings.is_empty() {
-            messages.push(String::new());
-            messages.push("⚠ Compatibility warnings:".into());
-            for w in warnings {
-                messages.push(format!("  • {w}"));
-            }
-        }
-        Self {
-            title: "Confirm Purchase".into(),
-            messages,
-            confirm_text: "Buy".into(),
-            cancel_text: "Cancel".into(),
-            on_confirm: DialogAction::None, // Will be set by caller
-        }
-    }
-
-    pub fn install_confirmation(
-        component_name: &str,
-        removed: &[String],
-        warnings: &[String],
-        pc_functional: bool,
-    ) -> Self {
-        let mut messages = vec![format!("Install {}?", component_name)];
-        if !removed.is_empty() {
-            messages.push(String::new());
-            messages.push("⚠ The following will be removed:".into());
-            for r in removed {
-                messages.push(format!("  • {r}"));
-            }
-        }
-        if !warnings.is_empty() {
-            messages.push(String::new());
-            for w in warnings {
-                messages.push(format!("  ⚠ {w}"));
-            }
-        }
-        if !pc_functional {
-            messages.push(String::new());
-            messages.push("❌ PC will NOT be functional after this!".into());
-        }
-        Self {
-            title: "Confirm Installation".into(),
-            messages,
-            confirm_text: "Install".into(),
-            cancel_text: "Cancel".into(),
-            on_confirm: DialogAction::None,
-        }
-    }
-}
-
-/// Shop category being viewed
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ShopCategory {
-    #[default]
-    Cpu,
-    Cooler,
-    Motherboard,
-    Ram,
-    Storage,
-    Network,
-}
-
-impl ShopCategory {
-    pub const fn all() -> &'static [Self] {
-        &[
-            Self::Cpu,
-            Self::Cooler,
-            Self::Motherboard,
-            Self::Ram,
-            Self::Storage,
-            Self::Network,
-        ]
-    }
-
-    pub const fn name(&self) -> &'static str {
-        match self {
-            Self::Cpu => "CPU",
-            Self::Cooler => "Cooler",
-            Self::Motherboard => "Motherboard",
-            Self::Ram => "RAM",
-            Self::Storage => "Storage",
-            Self::Network => "Network",
-        }
-    }
+    Available,
 }
 
 pub struct App {
@@ -141,13 +32,10 @@ pub struct App {
     pub should_quit: bool,
     pub animation_tick: u64,
     pub ui_mode: UIMode,
-    // Shop state (merged with assembly)
-    pub shop_category: ShopCategory,
+    // Shop state
+    pub shop_category: HardwareKind,
     pub shop_selection: usize,
-    pub shop_tab: ShopTab, // Available vs Owned items
-    // Dialog state
-    pub dialog: Option<Dialog>,
-    pub dialog_confirmed: bool,
+    pub shop_tab: ShopTab,
 }
 
 impl Default for App {
@@ -168,11 +56,9 @@ impl App {
             should_quit: false,
             animation_tick: 0,
             ui_mode: UIMode::Normal,
-            shop_category: ShopCategory::Cpu,
+            shop_category: HardwareKind::Cpu,
             shop_selection: 0,
             shop_tab: ShopTab::Available,
-            dialog: None,
-            dialog_confirmed: false,
         }
     }
 
@@ -185,9 +71,9 @@ impl App {
     pub fn open_shop(&mut self) {
         if self.can_open_shop() {
             self.ui_mode = UIMode::Shop;
-            self.shop_category = ShopCategory::Cpu;
+            self.shop_category = HardwareKind::Cpu;
             self.shop_selection = 0;
-            self.shop_tab = ShopTab::Available;
+            self.shop_tab = ShopTab::default();
         }
     }
 
@@ -195,7 +81,6 @@ impl App {
     pub fn try_close_shop(&mut self) -> bool {
         if self.player.pc_functional() {
             self.ui_mode = UIMode::Normal;
-            self.dialog = None;
             true
         } else {
             false
@@ -209,28 +94,6 @@ impl App {
             ShopTab::Owned => ShopTab::Available,
         };
         self.shop_selection = 0;
-    }
-
-    /// Show a dialog
-    pub fn show_dialog(&mut self, dialog: Dialog) {
-        self.dialog = Some(dialog);
-        self.dialog_confirmed = false;
-    }
-
-    /// Close the current dialog
-    pub fn close_dialog(&mut self) {
-        self.dialog = None;
-        self.dialog_confirmed = false;
-    }
-
-    /// Confirm the current dialog and return the action
-    pub fn confirm_dialog(&mut self) -> Option<DialogAction> {
-        if let Some(dialog) = self.dialog.take() {
-            self.dialog_confirmed = true;
-            Some(dialog.on_confirm)
-        } else {
-            None
-        }
     }
 
     pub fn on_tick(&mut self, tool_registry: &crate::tools::ToolRegistry) {

@@ -279,30 +279,30 @@ impl ComponentSlotType {
         }
     }
 
-    /// Get the slot kind for categorization
-    pub const fn kind(&self) -> ComponentSlotKind {
+    /// Get the hardware kind for categorization
+    pub const fn kind(&self) -> HardwareKind {
         match self {
-            Self::Cpu(_) => ComponentSlotKind::Cpu,
-            Self::Cooler(_) => ComponentSlotKind::Cooler,
-            Self::Ram(_) => ComponentSlotKind::Ram,
-            Self::Storage(_) => ComponentSlotKind::Storage,
-            Self::Network(_) => ComponentSlotKind::Network,
+            Self::Cpu(_) => HardwareKind::Cpu,
+            Self::Cooler(_) => HardwareKind::Cooler,
+            Self::Ram(_) => HardwareKind::Ram,
+            Self::Storage(_) => HardwareKind::Storage,
+            Self::Network(_) => HardwareKind::Network,
         }
     }
 
     /// Check if a component is compatible with this slot
-    pub fn is_compatible(&self, component: &OwnedComponent) -> bool {
+    pub fn is_compatible(&self, component: &HardwareComponent) -> bool {
         match (self, component) {
-            (Self::Cpu(slot), OwnedComponent::Cpu(cpu)) => slot.socket == cpu.socket,
-            (Self::Cooler(slot), OwnedComponent::Cooler(cooler)) => slot
+            (Self::Cpu(slot), HardwareComponent::Cpu(cpu)) => slot.socket == cpu.socket,
+            (Self::Cooler(slot), HardwareComponent::Cooler(cooler)) => slot
                 .compatible_sockets
                 .iter()
                 .any(|s| cooler.is_compatible(*s)),
             #[allow(clippy::suspicious_operation_groupings)]
-            (Self::Ram(slot), OwnedComponent::Ram(ram)) => {
+            (Self::Ram(slot), HardwareComponent::Ram(ram)) => {
                 slot.ram_type == ram.ram_type && ram.capacity_mb <= slot.max_capacity_mb
             }
-            (Self::Storage(slot), OwnedComponent::Storage(storage)) => {
+            (Self::Storage(slot), HardwareComponent::Storage(storage)) => {
                 // NVMe storage needs NVMe slot, others can use SATA/IDE
                 matches!(
                     (slot.slot_type, storage.storage_type),
@@ -311,68 +311,94 @@ impl ComponentSlotType {
                         | (StorageSlotType::IDE, StorageType::HDD)
                 )
             }
-            (Self::Network(_), OwnedComponent::Network(_)) => true,
+            (Self::Network(_), HardwareComponent::Network(_)) => true,
             _ => false,
         }
     }
 
     /// Install a component into this slot, returning the old component if any
-    pub fn install(&mut self, component: OwnedComponent) -> Result<Option<OwnedComponent>, String> {
-        if !self.is_compatible(&component) {
-            return Err("Component not compatible with this slot".to_string());
-        }
+    /// IMPORTANT: Call `is_compatible` first to verify this will succeed
+    pub fn install(&mut self, component: HardwareComponent) -> Option<HardwareComponent> {
+        debug_assert!(
+            self.is_compatible(&component),
+            "install called without checking compatibility"
+        );
 
         match (self, component) {
-            (Self::Cpu(slot), OwnedComponent::Cpu(cpu)) => {
-                Ok(slot.installed.replace(cpu).map(OwnedComponent::Cpu))
+            (Self::Cpu(slot), HardwareComponent::Cpu(cpu)) => {
+                slot.installed.replace(cpu).map(HardwareComponent::Cpu)
             }
-            (Self::Cooler(slot), OwnedComponent::Cooler(cooler)) => {
-                Ok(slot.installed.replace(cooler).map(OwnedComponent::Cooler))
+            (Self::Cooler(slot), HardwareComponent::Cooler(cooler)) => slot
+                .installed
+                .replace(cooler)
+                .map(HardwareComponent::Cooler),
+            (Self::Ram(slot), HardwareComponent::Ram(ram)) => {
+                slot.installed.replace(ram).map(HardwareComponent::Ram)
             }
-            (Self::Ram(slot), OwnedComponent::Ram(ram)) => {
-                Ok(slot.installed.replace(ram).map(OwnedComponent::Ram))
-            }
-            (Self::Storage(slot), OwnedComponent::Storage(storage)) => {
-                Ok(slot.installed.replace(storage).map(OwnedComponent::Storage))
-            }
-            (Self::Network(slot), OwnedComponent::Network(network)) => {
-                Ok(slot.installed.replace(network).map(OwnedComponent::Network))
-            }
-            _ => Err("Component type mismatch".to_string()),
+            (Self::Storage(slot), HardwareComponent::Storage(storage)) => slot
+                .installed
+                .replace(storage)
+                .map(HardwareComponent::Storage),
+            (Self::Network(slot), HardwareComponent::Network(network)) => slot
+                .installed
+                .replace(network)
+                .map(HardwareComponent::Network),
+            // Safety: debug_assert above checks compatibility
+            _ => unreachable!(),
         }
     }
 
     /// Uninstall and return the component from this slot
-    pub fn uninstall(&mut self) -> Option<OwnedComponent> {
+    pub fn uninstall(&mut self) -> Option<HardwareComponent> {
         match self {
-            Self::Cpu(slot) => slot.installed.take().map(OwnedComponent::Cpu),
-            Self::Cooler(slot) => slot.installed.take().map(OwnedComponent::Cooler),
-            Self::Ram(slot) => slot.installed.take().map(OwnedComponent::Ram),
-            Self::Storage(slot) => slot.installed.take().map(OwnedComponent::Storage),
-            Self::Network(slot) => slot.installed.take().map(OwnedComponent::Network),
+            Self::Cpu(slot) => slot.installed.take().map(HardwareComponent::Cpu),
+            Self::Cooler(slot) => slot.installed.take().map(HardwareComponent::Cooler),
+            Self::Ram(slot) => slot.installed.take().map(HardwareComponent::Ram),
+            Self::Storage(slot) => slot.installed.take().map(HardwareComponent::Storage),
+            Self::Network(slot) => slot.installed.take().map(HardwareComponent::Network),
         }
     }
 }
 
-/// Simple enum for categorizing slot types (no data)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ComponentSlotKind {
+/// Unified enum for all hardware categories
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HardwareKind {
+    #[default]
     Cpu,
     Cooler,
+    Motherboard,
     Ram,
     Storage,
     Network,
 }
 
-impl ComponentSlotKind {
+impl HardwareKind {
+    /// All hardware kinds in display order
+    pub const fn all() -> &'static [Self] {
+        &[
+            Self::Cpu,
+            Self::Cooler,
+            Self::Motherboard,
+            Self::Ram,
+            Self::Storage,
+            Self::Network,
+        ]
+    }
+
     pub const fn name(&self) -> &'static str {
         match self {
             Self::Cpu => "CPU",
             Self::Cooler => "Cooler",
+            Self::Motherboard => "Motherboard",
             Self::Ram => "RAM",
             Self::Storage => "Storage",
             Self::Network => "Network",
         }
+    }
+
+    /// Whether this kind represents a slot type within a motherboard
+    pub const fn is_slot_kind(&self) -> bool {
+        !matches!(self, Self::Motherboard)
     }
 }
 
@@ -416,54 +442,65 @@ impl Motherboard {
         })
     }
 
-    /// Count total slots of a specific kind
-    pub fn slot_count(&self, kind: ComponentSlotKind) -> usize {
+    /// Count total slots of a specific kind (0 for Motherboard)
+    pub fn slot_count(&self, kind: HardwareKind) -> usize {
+        if !kind.is_slot_kind() {
+            return 0;
+        }
         self.slots.iter().filter(|s| s.kind() == kind).count()
     }
 
-    /// Count filled slots of a specific kind
-    pub fn filled_count(&self, kind: ComponentSlotKind) -> usize {
+    /// Count filled slots of a specific kind (0 for Motherboard)
+    pub fn filled_count(&self, kind: HardwareKind) -> usize {
+        if !kind.is_slot_kind() {
+            return 0;
+        }
         self.slots
             .iter()
             .filter(|s| s.kind() == kind && s.is_filled())
             .count()
     }
 
-    /// Count empty slots of a specific kind
-    pub fn empty_count(&self, kind: ComponentSlotKind) -> usize {
+    /// Count empty slots of a specific kind (0 for Motherboard)
+    pub fn empty_count(&self, kind: HardwareKind) -> usize {
         self.slot_count(kind) - self.filled_count(kind)
+    }
+
+    /// Check if this component kind has no installed components
+    pub fn needs_component(&self, kind: HardwareKind) -> bool {
+        self.filled_count(kind) == 0
+    }
+
+    /// Check if there's at least one empty slot for this component kind
+    pub fn has_empty_slot(&self, kind: HardwareKind) -> bool {
+        self.empty_count(kind) > 0
     }
 
     /// Check if PC is functional (has at least 1 of each required component installed)
     pub fn is_functional(&self) -> bool {
-        let has_cpu = self
-            .slots
-            .iter()
-            .any(|s| matches!(s, ComponentSlotType::Cpu(c) if c.installed.is_some()));
-        let has_cooler = self
-            .slots
-            .iter()
-            .any(|s| matches!(s, ComponentSlotType::Cooler(c) if c.installed.is_some()));
-        let has_ram = self
-            .slots
-            .iter()
-            .any(|s| matches!(s, ComponentSlotType::Ram(r) if r.installed.is_some()));
-        let has_storage = self
-            .slots
-            .iter()
-            .any(|s| matches!(s, ComponentSlotType::Storage(st) if st.installed.is_some()));
-        let has_network = self
-            .slots
-            .iter()
-            .any(|s| matches!(s, ComponentSlotType::Network(n) if n.installed.is_some()));
-
-        has_cpu && has_cooler && has_ram && has_storage && has_network
+        let (mut cpu, mut cooler, mut ram, mut storage, mut network) =
+            (false, false, false, false, false);
+        for slot in &self.slots {
+            match slot {
+                ComponentSlotType::Cpu(s) if s.installed.is_some() => cpu = true,
+                ComponentSlotType::Cooler(s) if s.installed.is_some() => cooler = true,
+                ComponentSlotType::Ram(s) if s.installed.is_some() => ram = true,
+                ComponentSlotType::Storage(s) if s.installed.is_some() => storage = true,
+                ComponentSlotType::Network(s) if s.installed.is_some() => network = true,
+                _ => {}
+            }
+            // Early exit if all found
+            if cpu && cooler && ram && storage && network {
+                return true;
+            }
+        }
+        cpu && cooler && ram && storage && network
     }
 
     /// Find first empty slot compatible with the given component
     pub fn find_empty_compatible_slot(
         &mut self,
-        component: &OwnedComponent,
+        component: &HardwareComponent,
     ) -> Option<&mut ComponentSlotType> {
         self.slots
             .iter_mut()
@@ -471,7 +508,7 @@ impl Motherboard {
     }
 
     /// Count empty slots compatible with a component
-    pub fn count_empty_compatible_slots(&self, component: &OwnedComponent) -> usize {
+    pub fn count_empty_compatible_slots(&self, component: &HardwareComponent) -> usize {
         self.slots
             .iter()
             .filter(|s| !s.is_filled() && s.is_compatible(component))
@@ -479,29 +516,26 @@ impl Motherboard {
     }
 
     /// Install a component into the first compatible empty slot
-    pub fn install(&mut self, component: OwnedComponent) -> Result<(), String> {
+    /// IMPORTANT: Call `count_empty_compatible_slots` first to verify this will succeed
+    pub fn install(&mut self, component: HardwareComponent) {
         let slot = self
             .find_empty_compatible_slot(&component)
-            .ok_or_else(|| format!("No compatible empty slot for {}", component.name()))?;
-        slot.install(component)?;
-        Ok(())
+            .expect("no compatible empty slot - should check first");
+        slot.install(component);
     }
 
     /// Install a component into a specific slot index, returning old component if any
     pub fn install_at(
         &mut self,
         index: usize,
-        component: OwnedComponent,
-    ) -> Result<Option<OwnedComponent>, String> {
-        let slot = self
-            .slots
-            .get_mut(index)
-            .ok_or_else(|| format!("Invalid slot index: {index}"))?;
+        component: HardwareComponent,
+    ) -> Option<HardwareComponent> {
+        let slot = self.slots.get_mut(index).expect("invalid slot index");
         slot.install(component)
     }
 
     /// Uninstall component from a specific slot index
-    pub fn uninstall_at(&mut self, index: usize) -> Option<OwnedComponent> {
+    pub fn uninstall_at(&mut self, index: usize) -> Option<HardwareComponent> {
         self.slots
             .get_mut(index)
             .and_then(ComponentSlotType::uninstall)
@@ -588,43 +622,11 @@ impl Motherboard {
         let cooler_tdp = self.cooler().map_or(0, |c| c.max_tdp);
         cpu.compute_power(cooler_tdp)
     }
-}
-
-// ============================================================================
-// Complete PC Configuration (Legacy - for compatibility)
-// ============================================================================
-
-/// A complete PC configuration with all components (legacy struct)
-/// Used primarily for computing aggregate stats from a functional motherboard
-#[derive(Debug, Clone)]
-pub struct PC {
-    pub motherboard: Motherboard,
-}
-
-impl PC {
-    /// Create PC from a functional motherboard
-    pub fn from_motherboard(motherboard: Motherboard) -> Option<Self> {
-        if motherboard.is_functional() {
-            Some(Self { motherboard })
-        } else {
-            None
-        }
-    }
-
-    /// Get effective CPU frequency considering cooler
-    pub fn effective_cpu_freq(&self) -> u32 {
-        self.motherboard.effective_cpu_freq()
-    }
-
-    /// Get compute power score
-    pub fn compute_power(&self) -> u32 {
-        self.motherboard.compute_power()
-    }
 
     /// Get memory bandwidth score
     #[allow(clippy::cast_possible_truncation)]
     pub fn memory_score(&self) -> u32 {
-        let rams = self.motherboard.rams();
+        let rams = self.rams();
         if rams.is_empty() {
             return 0;
         }
@@ -635,17 +637,11 @@ impl PC {
 
     /// Get storage speed score
     pub fn storage_score(&self) -> u32 {
-        self.motherboard
-            .storages()
+        self.storages()
             .iter()
             .map(|s| u32::midpoint(s.read_speed_mbps, s.write_speed_mbps))
             .max()
             .unwrap_or(0)
-    }
-
-    /// Get network speed
-    pub fn network_speed(&self) -> u32 {
-        self.motherboard.best_network_speed()
     }
 
     /// Overall power score for tool effectiveness
@@ -658,45 +654,9 @@ impl PC {
 // Component Inventory & Assembly System
 // ============================================================================
 
-/// Identifies which component category we're working with (includes Motherboard)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ComponentSlot {
-    Cpu,
-    Cooler,
-    Motherboard,
-    Ram,
-    Storage,
-    Network,
-}
-
-impl ComponentSlot {
-    pub const fn name(&self) -> &'static str {
-        match self {
-            Self::Cpu => "CPU",
-            Self::Cooler => "Cooler",
-            Self::Motherboard => "Motherboard",
-            Self::Ram => "RAM",
-            Self::Storage => "Storage",
-            Self::Network => "Network",
-        }
-    }
-
-    /// Convert to `ComponentSlotKind` (for non-motherboard slots)
-    pub const fn to_kind(&self) -> Option<ComponentSlotKind> {
-        match self {
-            Self::Cpu => Some(ComponentSlotKind::Cpu),
-            Self::Cooler => Some(ComponentSlotKind::Cooler),
-            Self::Ram => Some(ComponentSlotKind::Ram),
-            Self::Storage => Some(ComponentSlotKind::Storage),
-            Self::Network => Some(ComponentSlotKind::Network),
-            Self::Motherboard => None,
-        }
-    }
-}
-
 /// A component that can be stored in inventory
-#[derive(Debug, Clone)]
-pub enum OwnedComponent {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HardwareComponent {
     Cpu(Cpu),
     Cooler(Cooler),
     Motherboard(Motherboard),
@@ -705,7 +665,7 @@ pub enum OwnedComponent {
     Network(NetworkCard),
 }
 
-impl OwnedComponent {
+impl HardwareComponent {
     pub const fn name(&self) -> &str {
         match self {
             Self::Cpu(c) => c.name,
@@ -728,14 +688,14 @@ impl OwnedComponent {
         }
     }
 
-    pub const fn slot(&self) -> ComponentSlot {
+    pub const fn kind(&self) -> HardwareKind {
         match self {
-            Self::Cpu(_) => ComponentSlot::Cpu,
-            Self::Cooler(_) => ComponentSlot::Cooler,
-            Self::Motherboard(_) => ComponentSlot::Motherboard,
-            Self::Ram(_) => ComponentSlot::Ram,
-            Self::Storage(_) => ComponentSlot::Storage,
-            Self::Network(_) => ComponentSlot::Network,
+            Self::Cpu(_) => HardwareKind::Cpu,
+            Self::Cooler(_) => HardwareKind::Cooler,
+            Self::Motherboard(_) => HardwareKind::Motherboard,
+            Self::Ram(_) => HardwareKind::Ram,
+            Self::Storage(_) => HardwareKind::Storage,
+            Self::Network(_) => HardwareKind::Network,
         }
     }
 
@@ -749,97 +709,157 @@ impl OwnedComponent {
             Self::Network(n) => n.price,
         }
     }
+
+    /// Get a human-readable description of the component
+    pub fn description(&self) -> String {
+        match self {
+            Self::Cpu(c) => format!(
+                "{} cores / {} threads, {}-{} MHz, {} W TDP",
+                c.cores, c.threads, c.base_freq_mhz, c.max_freq_mhz, c.tdp_watts
+            ),
+            Self::Cooler(c) => format!("{:?} cooler, up to {} W TDP", c.cooler_type, c.max_tdp),
+            Self::Motherboard(m) => {
+                let socket = m
+                    .socket()
+                    .map_or_else(|| "N/A".to_string(), |s| format!("{s}"));
+                let ram_type = m
+                    .ram_type()
+                    .map_or_else(|| "N/A".to_string(), |r| format!("{r}"));
+                let ram_slots = m.slot_count(HardwareKind::Ram);
+                format!("{socket} socket, {ram_type} support, {ram_slots} RAM slots")
+            }
+            Self::Ram(r) => format!(
+                "{} {} @ {} MHz",
+                format_bytes(r.capacity_mb),
+                r.ram_type,
+                r.speed_mhz
+            ),
+            Self::Storage(s) => format!(
+                "{} {:?}, {}/{} MB/s R/W",
+                format_bytes(s.capacity_mb),
+                s.storage_type,
+                s.read_speed_mbps,
+                s.write_speed_mbps
+            ),
+            Self::Network(n) => format!("{:?} @ {}", n.network_type, format_speed(n.speed_kbps)),
+        }
+    }
+
+    /// Get socket/type compatibility info for the component
+    pub fn socket_info(&self) -> Option<String> {
+        match self {
+            Self::Cpu(c) => Some(format!("{}", c.socket)),
+            Self::Cooler(c) => {
+                let sockets: Vec<_> = c
+                    .compatible_sockets
+                    .iter()
+                    .map(|s| format!("{s}"))
+                    .collect();
+                Some(sockets.join(", "))
+            }
+            Self::Motherboard(m) => m.socket().map(|s| format!("{s}")),
+            Self::Ram(r) => Some(format!("{}", r.ram_type)),
+            Self::Storage(_) | Self::Network(_) => None,
+        }
+    }
+}
+
+/// Format bytes to human readable
+pub fn format_bytes(mb: u32) -> String {
+    if mb >= 1_048_576 {
+        format!("{:.1} TB", f64::from(mb) / 1_048_576.0)
+    } else if mb >= 1024 {
+        format!("{:.1} GB", f64::from(mb) / 1024.0)
+    } else {
+        format!("{mb} MB")
+    }
+}
+
+/// Format speed to human readable
+pub fn format_speed(kbps: u32) -> String {
+    if kbps >= 1_048_576 {
+        format!("{:.1} Gbps", f64::from(kbps) / 1_048_576.0)
+    } else if kbps >= 1024 {
+        format!("{:.1} Mbps", f64::from(kbps) / 1024.0)
+    } else {
+        format!("{kbps} Kbps")
+    }
 }
 
 /// Player's component inventory (purchased but not installed)
 #[derive(Debug, Clone, Default)]
 pub struct ComponentInventory {
-    pub cpus: Vec<Cpu>,
-    pub coolers: Vec<Cooler>,
-    pub motherboards: Vec<Motherboard>,
-    pub rams: Vec<Ram>,
-    pub storage: Vec<Storage>,
-    pub networks: Vec<NetworkCard>,
+    items: Vec<HardwareComponent>,
 }
 
 impl ComponentInventory {
-    pub fn add(&mut self, component: OwnedComponent) {
-        match component {
-            OwnedComponent::Cpu(c) => self.cpus.push(c),
-            OwnedComponent::Cooler(c) => self.coolers.push(c),
-            OwnedComponent::Motherboard(m) => self.motherboards.push(m),
-            OwnedComponent::Ram(r) => self.rams.push(r),
-            OwnedComponent::Storage(s) => self.storage.push(s),
-            OwnedComponent::Network(n) => self.networks.push(n),
-        }
+    pub fn add(&mut self, component: HardwareComponent) {
+        self.items.push(component);
     }
 
-    pub fn remove_by_id(&mut self, slot: ComponentSlot, id: &str) -> Option<OwnedComponent> {
-        match slot {
-            ComponentSlot::Cpu => {
-                let idx = self.cpus.iter().position(|c| c.id == id)?;
-                Some(OwnedComponent::Cpu(self.cpus.remove(idx)))
-            }
-            ComponentSlot::Cooler => {
-                let idx = self.coolers.iter().position(|c| c.id == id)?;
-                Some(OwnedComponent::Cooler(self.coolers.remove(idx)))
-            }
-            ComponentSlot::Motherboard => {
-                let idx = self.motherboards.iter().position(|m| m.id == id)?;
-                Some(OwnedComponent::Motherboard(self.motherboards.remove(idx)))
-            }
-            ComponentSlot::Ram => {
-                let idx = self.rams.iter().position(|r| r.id == id)?;
-                Some(OwnedComponent::Ram(self.rams.remove(idx)))
-            }
-            ComponentSlot::Storage => {
-                let idx = self.storage.iter().position(|s| s.id == id)?;
-                Some(OwnedComponent::Storage(self.storage.remove(idx)))
-            }
-            ComponentSlot::Network => {
-                let idx = self.networks.iter().position(|n| n.id == id)?;
-                Some(OwnedComponent::Network(self.networks.remove(idx)))
-            }
-        }
+    /// Remove a component by kind and index within that kind
+    pub fn remove_at(&mut self, kind: HardwareKind, index: usize) -> Option<HardwareComponent> {
+        // Find the actual index in the items vec
+        let actual_index = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.kind() == kind)
+            .nth(index)
+            .map(|(i, _)| i)?;
+        Some(self.items.remove(actual_index))
     }
 
     pub const fn is_empty(&self) -> bool {
-        self.cpus.is_empty()
-            && self.coolers.is_empty()
-            && self.motherboards.is_empty()
-            && self.rams.is_empty()
-            && self.storage.is_empty()
-            && self.networks.is_empty()
+        self.items.is_empty()
     }
 
     pub const fn total_count(&self) -> usize {
-        self.cpus.len()
-            + self.coolers.len()
-            + self.motherboards.len()
-            + self.rams.len()
-            + self.storage.len()
-            + self.networks.len()
+        self.items.len()
+    }
+
+    pub fn count_items_for(&self, kind: HardwareKind) -> usize {
+        self.items.iter().filter(|c| c.kind() == kind).count()
+    }
+
+    /// Get an iterator over items for a hardware kind
+    pub fn items_for(&self, kind: HardwareKind) -> impl Iterator<Item = &HardwareComponent> {
+        self.items.iter().filter(move |c| c.kind() == kind)
+    }
+
+    /// Get a specific item by kind and index (within that kind)
+    pub fn get_at(&self, kind: HardwareKind, index: usize) -> Option<&HardwareComponent> {
+        self.items_for(kind).nth(index)
+    }
+
+    /// Check if a motherboard with the given id exists in inventory
+    pub fn has_motherboard(&self, mb_id: &str) -> bool {
+        self.items
+            .iter()
+            .any(|c| matches!(c, HardwareComponent::Motherboard(m) if m.id == mb_id))
+    }
+
+    /// Count items that are equal to the given component
+    pub fn count_matching(&self, item: &HardwareComponent) -> usize {
+        self.items.iter().filter(|c| *c == item).count()
+    }
+
+    /// Get first motherboard in inventory (if any)
+    pub fn first_motherboard(&self) -> Option<&Motherboard> {
+        self.items.iter().find_map(|c| match c {
+            HardwareComponent::Motherboard(m) => Some(m),
+            _ => None,
+        })
     }
 }
 
 /// PC with optional motherboard (motherboard contains all component slots)
 #[derive(Debug, Clone, Default)]
-pub struct AssembledPC {
+pub struct PC {
     pub motherboard: Option<Motherboard>,
 }
 
-/// Result of attempting to install a component
-#[derive(Debug, Clone)]
-pub struct InstallResult {
-    /// Warning messages about the installation
-    pub warnings: Vec<String>,
-    /// Whether the PC will be functional after install
-    pub pc_functional: bool,
-    /// Whether the install is blocked (incompatible)
-    pub blocked: bool,
-}
-
-impl AssembledPC {
+impl PC {
     /// Create from a motherboard
     pub const fn from_motherboard(motherboard: Motherboard) -> Self {
         Self {
@@ -847,10 +867,9 @@ impl AssembledPC {
         }
     }
 
-    /// Try to convert to a complete PC (returns None if not functional)
-    pub fn to_complete_pc(&self) -> Option<PC> {
-        let mb = self.motherboard.as_ref()?;
-        PC::from_motherboard(mb.clone())
+    /// Get the motherboard if the PC is functional
+    pub fn functional_motherboard(&self) -> Option<&Motherboard> {
+        self.motherboard.as_ref().filter(|mb| mb.is_functional())
     }
 
     /// Check if PC is functional (motherboard exists and has required components)
@@ -860,129 +879,71 @@ impl AssembledPC {
             .is_some_and(Motherboard::is_functional)
     }
 
-    /// Check if the current configuration is valid
-    pub fn is_valid(&self) -> bool {
-        self.is_functional()
-    }
-
-    /// Get list of component categories that need at least one component
-    pub fn empty_slot_kinds(&self) -> Vec<ComponentSlotKind> {
-        let Some(mb) = &self.motherboard else {
-            return vec![
-                ComponentSlotKind::Cpu,
-                ComponentSlotKind::Cooler,
-                ComponentSlotKind::Ram,
-                ComponentSlotKind::Storage,
-                ComponentSlotKind::Network,
-            ];
-        };
-
-        let mut empty = Vec::new();
-        if mb.filled_count(ComponentSlotKind::Cpu) == 0 {
-            empty.push(ComponentSlotKind::Cpu);
-        }
-        if mb.filled_count(ComponentSlotKind::Cooler) == 0 {
-            empty.push(ComponentSlotKind::Cooler);
-        }
-        if mb.filled_count(ComponentSlotKind::Ram) == 0 {
-            empty.push(ComponentSlotKind::Ram);
-        }
-        if mb.filled_count(ComponentSlotKind::Storage) == 0 {
-            empty.push(ComponentSlotKind::Storage);
-        }
-        if mb.filled_count(ComponentSlotKind::Network) == 0 {
-            empty.push(ComponentSlotKind::Network);
-        }
-        empty
-    }
-
-    /// Preview what happens when installing a component
-    pub fn preview_install(&self, component: &OwnedComponent) -> InstallResult {
-        let mut warnings = Vec::new();
-        let mut blocked = false;
-
-        // Installing a new motherboard
-        if let OwnedComponent::Motherboard(new_mb) = component {
-            // Check compatibility with inventory components that might be installed later
-            // For now, motherboard can always be installed
-            if self.motherboard.is_some() {
-                warnings.push("Will replace current motherboard".to_string());
-            }
-            return InstallResult {
-                warnings,
-                pc_functional: new_mb.is_functional(),
-                blocked: false,
-            };
+    /// Check if a component can be installed (without modifying anything)
+    /// Returns Ok(()) if installable, Err with reason if not
+    pub fn can_install(&self, component: &HardwareComponent) -> Result<(), String> {
+        // Motherboards can always be installed (replaces existing)
+        if matches!(component, HardwareComponent::Motherboard(_)) {
+            return Ok(());
         }
 
         // For other components, need a motherboard first
-        let Some(mb) = &self.motherboard else {
-            return InstallResult {
-                warnings: vec!["✗ BLOCKED: No motherboard installed".to_string()],
-                pc_functional: false,
-                blocked: true,
-            };
-        };
+        let mb = self
+            .motherboard
+            .as_ref()
+            .ok_or("No motherboard installed")?;
 
         // Check if there's a compatible slot
         if mb.count_empty_compatible_slots(component) == 0 {
-            // Check if it's a compatibility issue or just no slots
-            let kind = component.slot().to_kind();
-            if let Some(k) = kind {
-                if mb.empty_count(k) == 0 {
-                    warnings.push(format!("✗ BLOCKED: All {} slots are full", k.name()));
-                } else {
-                    warnings.push(format!(
-                        "✗ BLOCKED: Not compatible with any {} slot",
-                        k.name()
-                    ));
-                }
+            let kind = component.kind();
+            if mb.empty_count(kind) == 0 {
+                return Err(format!("All {} slots are full", kind.name()));
             }
-            blocked = true;
+            return Err(format!("Not compatible with any {} slot", kind.name()));
         }
 
-        // Check if PC will be functional after install
-        let pc_functional = if blocked {
-            false
-        } else {
-            let mut test_mb = mb.clone();
-            test_mb.install(component.clone()).is_ok() && test_mb.is_functional()
-        };
-
-        InstallResult {
-            warnings,
-            pc_functional,
-            blocked,
-        }
+        Ok(())
     }
 
-    /// Install a component into the motherboard
-    pub fn install_component(
-        &mut self,
-        component: OwnedComponent,
-    ) -> Result<Option<OwnedComponent>, String> {
+    /// Preview warnings when installing a component (informational only)
+    pub fn install_warnings(&self, component: &HardwareComponent) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        // Check if installation is blocked
+        if let Err(reason) = self.can_install(component) {
+            warnings.push(format!("✗ BLOCKED: {reason}"));
+            return warnings;
+        }
+
+        warnings
+    }
+
+    /// Install a component into the PC
+    /// IMPORTANT: Call `can_install` first to verify this will succeed
+    pub fn install_component(&mut self, component: HardwareComponent) -> Option<HardwareComponent> {
         // Special case: installing a motherboard
-        if let OwnedComponent::Motherboard(new_mb) = component {
-            let old = self.motherboard.replace(new_mb);
-            return Ok(old.map(OwnedComponent::Motherboard));
+        if let HardwareComponent::Motherboard(new_mb) = component {
+            return self
+                .motherboard
+                .replace(new_mb)
+                .map(HardwareComponent::Motherboard);
         }
 
         // For other components, install into motherboard
         let mb = self
             .motherboard
             .as_mut()
-            .ok_or("No motherboard installed")?;
-
-        // Find compatible empty slot and install
+            .expect("can_install should have been called first");
         let slot = mb
             .find_empty_compatible_slot(&component)
-            .ok_or_else(|| format!("No compatible empty slot for {}", component.name()))?;
+            .expect("can_install should have been called first");
 
+        // Install returns the old component (if any), but for empty slots this is always None
         slot.install(component)
     }
 
     /// Uninstall a component from a specific slot index
-    pub fn uninstall_at(&mut self, slot_index: usize) -> Option<OwnedComponent> {
+    pub fn uninstall_at(&mut self, slot_index: usize) -> Option<HardwareComponent> {
         self.motherboard.as_mut()?.uninstall_at(slot_index)
     }
 
@@ -991,16 +952,6 @@ impl AssembledPC {
         self.motherboard
             .as_ref()
             .map_or(0, Motherboard::compute_power)
-    }
-
-    /// Get the current socket (from motherboard)
-    pub fn current_socket(&self) -> Option<CpuSocket> {
-        self.motherboard.as_ref().and_then(Motherboard::socket)
-    }
-
-    /// Get the current RAM type (from motherboard)
-    pub fn current_ram_type(&self) -> Option<RamType> {
-        self.motherboard.as_ref().and_then(Motherboard::ram_type)
     }
 
     /// Get CPU if installed
@@ -1019,84 +970,77 @@ impl AssembledPC {
             .as_ref()
             .map_or_else(Vec::new, |mb| mb.rams())
     }
-
-    /// Get total RAM in MB
-    pub fn total_ram_mb(&self) -> u32 {
-        self.motherboard
-            .as_ref()
-            .map_or(0, Motherboard::total_ram_mb)
-    }
-
-    /// Get all installed storage
-    pub fn storages(&self) -> Vec<&Storage> {
-        self.motherboard
-            .as_ref()
-            .map_or_else(Vec::new, |mb| mb.storages())
-    }
-
-    /// Get total storage in MB
-    pub fn total_storage_mb(&self) -> u32 {
-        self.motherboard
-            .as_ref()
-            .map_or(0, Motherboard::total_storage_mb)
-    }
-
-    /// Get all installed network cards
-    pub fn networks(&self) -> Vec<&NetworkCard> {
-        self.motherboard
-            .as_ref()
-            .map_or_else(Vec::new, |mb| mb.networks())
-    }
-
-    /// Get best network speed
-    pub fn best_network_speed(&self) -> u32 {
-        self.motherboard
-            .as_ref()
-            .map_or(0, Motherboard::best_network_speed)
-    }
 }
 
 impl ComponentInventory {
-    /// Find best compatible CPU for the current PC config (highest compute power)
-    pub fn best_cpu(&self, socket: Option<CpuSocket>) -> Option<&Cpu> {
-        self.cpus
-            .iter()
-            .filter(|c| socket.is_none() || socket == Some(c.socket))
-            .max_by_key(|c| u32::from(c.cores) * c.max_freq_mhz)
+    /// Find index of best compatible CPU (highest compute power)
+    pub fn best_cpu_index(&self, socket: Option<CpuSocket>) -> Option<usize> {
+        self.items_for(HardwareKind::Cpu)
+            .enumerate()
+            .filter_map(|(i, c)| match c {
+                HardwareComponent::Cpu(cpu) if socket.is_none() || socket == Some(cpu.socket) => {
+                    Some((i, cpu))
+                }
+                _ => None,
+            })
+            .max_by_key(|(_, c)| u32::from(c.cores) * c.max_freq_mhz)
+            .map(|(i, _)| i)
     }
 
-    /// Find best compatible cooler (highest TDP support)
-    pub fn best_cooler(&self, socket: Option<CpuSocket>) -> Option<&Cooler> {
-        self.coolers
-            .iter()
-            .filter(|c| socket.is_none() || socket.is_some_and(|s| c.is_compatible(s)))
-            .max_by_key(|c| c.max_tdp)
+    /// Find index of best compatible cooler (highest TDP support)
+    pub fn best_cooler_index(&self, socket: Option<CpuSocket>) -> Option<usize> {
+        self.items_for(HardwareKind::Cooler)
+            .enumerate()
+            .filter_map(|(i, c)| match c {
+                HardwareComponent::Cooler(cooler)
+                    if socket.is_none() || socket.is_some_and(|s| cooler.is_compatible(s)) =>
+                {
+                    Some((i, cooler))
+                }
+                _ => None,
+            })
+            .max_by_key(|(_, c)| c.max_tdp)
+            .map(|(i, _)| i)
     }
 
-    /// Find best compatible motherboard for a socket
-    pub fn best_motherboard(&self, socket: Option<CpuSocket>) -> Option<&Motherboard> {
-        self.motherboards
-            .iter()
-            .filter(|m| socket.is_none() || m.socket() == socket)
-            .max_by_key(|m| m.slot_count(ComponentSlotKind::Ram))
+    /// Find index of best compatible RAM (highest capacity)
+    pub fn best_ram_index(&self, ram_type: Option<RamType>) -> Option<usize> {
+        self.items_for(HardwareKind::Ram)
+            .enumerate()
+            .filter_map(|(i, c)| match c {
+                HardwareComponent::Ram(ram)
+                    if ram_type.is_none() || ram_type == Some(ram.ram_type) =>
+                {
+                    Some((i, ram))
+                }
+                _ => None,
+            })
+            .max_by_key(|(_, r)| r.capacity_mb)
+            .map(|(i, _)| i)
     }
 
-    /// Find best compatible RAM (highest capacity)
-    pub fn best_ram(&self, ram_type: Option<RamType>) -> Option<&Ram> {
-        self.rams
-            .iter()
-            .filter(|r| ram_type.is_none() || ram_type == Some(r.ram_type))
-            .max_by_key(|r| r.capacity_mb)
+    /// Find index of best storage (highest capacity)
+    pub fn best_storage_index(&self) -> Option<usize> {
+        self.items_for(HardwareKind::Storage)
+            .enumerate()
+            .filter_map(|(i, c)| match c {
+                HardwareComponent::Storage(s) => Some((i, s)),
+                _ => None,
+            })
+            .max_by_key(|(_, s)| s.capacity_mb)
+            .map(|(i, _)| i)
     }
 
-    /// Find best storage (highest capacity)
-    pub fn best_storage(&self) -> Option<&Storage> {
-        self.storage.iter().max_by_key(|s| s.capacity_mb)
-    }
-
-    /// Find best network (highest speed)
-    pub fn best_network(&self) -> Option<&NetworkCard> {
-        self.networks.iter().max_by_key(|n| n.speed_kbps)
+    /// Find index of best network (highest speed)
+    pub fn best_network_index(&self) -> Option<usize> {
+        self.items_for(HardwareKind::Network)
+            .enumerate()
+            .filter_map(|(i, c)| match c {
+                HardwareComponent::Network(n) => Some((i, n)),
+                _ => None,
+            })
+            .max_by_key(|(_, n)| n.speed_kbps)
+            .map(|(i, _)| i)
     }
 }
 
@@ -1693,34 +1637,6 @@ pub static NETWORKS: &[NetworkCard] = &[
         price: 8000,
     },
 ];
-
-// ============================================================================
-// Helper functions
-// ============================================================================
-
-pub fn find_cpu(id: &str) -> Option<&'static Cpu> {
-    CPUS.iter().find(|c| c.id == id)
-}
-
-pub fn find_cooler(id: &str) -> Option<&'static Cooler> {
-    COOLERS.iter().find(|c| c.id == id)
-}
-
-pub fn find_motherboard(id: &str) -> Option<Motherboard> {
-    MOTHERBOARDS.iter().find(|m| m.id == id).cloned()
-}
-
-pub fn find_ram(id: &str) -> Option<&'static Ram> {
-    RAMS.iter().find(|r| r.id == id)
-}
-
-pub fn find_storage(id: &str) -> Option<&'static Storage> {
-    STORAGES.iter().find(|s| s.id == id)
-}
-
-pub fn find_network(id: &str) -> Option<&'static NetworkCard> {
-    NETWORKS.iter().find(|n| n.id == id)
-}
 
 /// Get maximum values for UI progress bars
 pub struct HardwareMaximums {
