@@ -213,7 +213,11 @@ fn get_item_count(app: &App) -> usize {
     match app.shop_tab {
         ShopTab::Available => Shop::count_items_for(app.shop_category),
         // Use grouped display count - this accounts for grouped spare items
-        ShopTab::Owned => app.player.inventory.grouped_display(app.shop_category).len(),
+        ShopTab::Owned => app
+            .player
+            .inventory
+            .grouped_display(app.shop_category)
+            .len(),
     }
 }
 
