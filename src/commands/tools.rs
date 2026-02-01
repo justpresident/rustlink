@@ -67,11 +67,9 @@ impl Command for RunCommand {
         let min_compute = tool.min_compute_power();
         let min_memory = tool.min_memory_mb();
         if !app.player.can_use_tool(min_compute, min_memory) {
-            // Get current PC stats (we know PC is functional from check above)
-            let (pc_compute, pc_ram) = app
-                .player
-                .working_motherboard()
-                .map_or((0, 0), |mb| (mb.compute_power(), mb.total_ram_mb()));
+            // Get current PC stats
+            let pc_compute = app.player.inventory.compute_power();
+            let pc_ram = app.player.inventory.total_ram_mb();
             app.log(format!(
                 "Insufficient hardware. {} requires: {} compute power, {} MB RAM",
                 tool.name(),

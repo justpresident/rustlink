@@ -219,43 +219,37 @@ impl fmt::Display for StorageSlotType {
 }
 
 // ============================================================================
-// Component Slot System
+// Component Slot System (defines constraints, not installed components)
 // ============================================================================
 
-/// CPU slot with socket constraint
+/// CPU slot constraint - defines socket type
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CpuSlot {
     pub socket: CpuSocket,
-    pub installed: Option<Cpu>,
 }
 
-/// Cooler slot with compatible sockets constraint
+/// Cooler slot constraint - defines compatible sockets
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoolerSlot {
     pub compatible_sockets: &'static [CpuSocket],
-    pub installed: Option<Cooler>,
 }
 
-/// RAM slot with type and capacity constraints
+/// RAM slot constraint - defines type and max capacity
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RamSlot {
     pub ram_type: RamType,
     pub max_capacity_mb: u32,
-    pub installed: Option<Ram>,
 }
 
-/// Storage slot with interface type
+/// Storage slot constraint - defines interface type
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageSlot {
     pub slot_type: StorageSlotType,
-    pub installed: Option<Storage>,
 }
 
-/// Network slot (PCI or onboard)
+/// Network slot (no constraints)
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NetworkSlot {
-    pub installed: Option<NetworkCard>,
-}
+pub struct NetworkSlot;
 
 /// Unified component slot enum - motherboard contains a vector of these
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -268,17 +262,6 @@ pub enum ComponentSlotType {
 }
 
 impl ComponentSlotType {
-    /// Check if this slot has a component installed
-    pub const fn is_filled(&self) -> bool {
-        match self {
-            Self::Cpu(s) => s.installed.is_some(),
-            Self::Cooler(s) => s.installed.is_some(),
-            Self::Ram(s) => s.installed.is_some(),
-            Self::Storage(s) => s.installed.is_some(),
-            Self::Network(s) => s.installed.is_some(),
-        }
-    }
-
     /// Get the hardware kind for categorization
     pub const fn kind(&self) -> HardwareKind {
         match self {
@@ -313,49 +296,6 @@ impl ComponentSlotType {
             }
             (Self::Network(_), HardwareComponent::Network(_)) => true,
             _ => false,
-        }
-    }
-
-    /// Install a component into this slot, returning the old component if any
-    /// IMPORTANT: Call `is_compatible` first to verify this will succeed
-    pub fn install(&mut self, component: HardwareComponent) -> Option<HardwareComponent> {
-        debug_assert!(
-            self.is_compatible(&component),
-            "install called without checking compatibility"
-        );
-
-        match (self, component) {
-            (Self::Cpu(slot), HardwareComponent::Cpu(cpu)) => {
-                slot.installed.replace(cpu).map(HardwareComponent::Cpu)
-            }
-            (Self::Cooler(slot), HardwareComponent::Cooler(cooler)) => slot
-                .installed
-                .replace(cooler)
-                .map(HardwareComponent::Cooler),
-            (Self::Ram(slot), HardwareComponent::Ram(ram)) => {
-                slot.installed.replace(ram).map(HardwareComponent::Ram)
-            }
-            (Self::Storage(slot), HardwareComponent::Storage(storage)) => slot
-                .installed
-                .replace(storage)
-                .map(HardwareComponent::Storage),
-            (Self::Network(slot), HardwareComponent::Network(network)) => slot
-                .installed
-                .replace(network)
-                .map(HardwareComponent::Network),
-            // Safety: debug_assert above checks compatibility
-            _ => unreachable!(),
-        }
-    }
-
-    /// Uninstall and return the component from this slot
-    pub fn uninstall(&mut self) -> Option<HardwareComponent> {
-        match self {
-            Self::Cpu(slot) => slot.installed.take().map(HardwareComponent::Cpu),
-            Self::Cooler(slot) => slot.installed.take().map(HardwareComponent::Cooler),
-            Self::Ram(slot) => slot.installed.take().map(HardwareComponent::Ram),
-            Self::Storage(slot) => slot.installed.take().map(HardwareComponent::Storage),
-            Self::Network(slot) => slot.installed.take().map(HardwareComponent::Network),
         }
     }
 }
@@ -450,203 +390,12 @@ impl Motherboard {
         self.slots.iter().filter(|s| s.kind() == kind).count()
     }
 
-    /// Count filled slots of a specific kind (0 for Motherboard)
-    pub fn filled_count(&self, kind: HardwareKind) -> usize {
-        if !kind.is_slot_kind() {
-            return 0;
-        }
+    /// Count slots compatible with a specific component
+    pub fn count_compatible_slots(&self, component: &HardwareComponent) -> usize {
         self.slots
             .iter()
-            .filter(|s| s.kind() == kind && s.is_filled())
+            .filter(|s| s.is_compatible(component))
             .count()
-    }
-
-    /// Count empty slots of a specific kind (0 for Motherboard)
-    pub fn empty_count(&self, kind: HardwareKind) -> usize {
-        self.slot_count(kind) - self.filled_count(kind)
-    }
-
-    /// Check if this component kind has no installed components
-    pub fn needs_component(&self, kind: HardwareKind) -> bool {
-        self.filled_count(kind) == 0
-    }
-
-    /// Check if there's at least one empty slot for this component kind
-    pub fn has_empty_slot(&self, kind: HardwareKind) -> bool {
-        self.empty_count(kind) > 0
-    }
-
-    /// Check if PC is functional (has at least 1 of each required component installed)
-    pub fn is_functional(&self) -> bool {
-        let (mut cpu, mut cooler, mut ram, mut storage, mut network) =
-            (false, false, false, false, false);
-        for slot in &self.slots {
-            match slot {
-                ComponentSlotType::Cpu(s) if s.installed.is_some() => cpu = true,
-                ComponentSlotType::Cooler(s) if s.installed.is_some() => cooler = true,
-                ComponentSlotType::Ram(s) if s.installed.is_some() => ram = true,
-                ComponentSlotType::Storage(s) if s.installed.is_some() => storage = true,
-                ComponentSlotType::Network(s) if s.installed.is_some() => network = true,
-                _ => {}
-            }
-            // Early exit if all found
-            if cpu && cooler && ram && storage && network {
-                return true;
-            }
-        }
-        cpu && cooler && ram && storage && network
-    }
-
-    /// Find first empty slot compatible with the given component
-    pub fn find_empty_compatible_slot(
-        &mut self,
-        component: &HardwareComponent,
-    ) -> Option<&mut ComponentSlotType> {
-        self.slots
-            .iter_mut()
-            .find(|s| !s.is_filled() && s.is_compatible(component))
-    }
-
-    /// Count empty slots compatible with a component
-    pub fn count_empty_compatible_slots(&self, component: &HardwareComponent) -> usize {
-        self.slots
-            .iter()
-            .filter(|s| !s.is_filled() && s.is_compatible(component))
-            .count()
-    }
-
-    /// Install a component into the first compatible empty slot
-    /// IMPORTANT: Call `count_empty_compatible_slots` first to verify this will succeed
-    pub fn install(&mut self, component: HardwareComponent) {
-        let slot = self
-            .find_empty_compatible_slot(&component)
-            .expect("no compatible empty slot - should check first");
-        slot.install(component);
-    }
-
-    /// Install a component into a specific slot index, returning old component if any
-    pub fn install_at(
-        &mut self,
-        index: usize,
-        component: HardwareComponent,
-    ) -> Option<HardwareComponent> {
-        let slot = self.slots.get_mut(index).expect("invalid slot index");
-        slot.install(component)
-    }
-
-    /// Uninstall component from a specific slot index
-    pub fn uninstall_at(&mut self, index: usize) -> Option<HardwareComponent> {
-        self.slots
-            .get_mut(index)
-            .and_then(ComponentSlotType::uninstall)
-    }
-
-    /// Get installed CPU (if any)
-    pub fn cpu(&self) -> Option<&Cpu> {
-        self.slots.iter().find_map(|s| match s {
-            ComponentSlotType::Cpu(slot) => slot.installed.as_ref(),
-            _ => None,
-        })
-    }
-
-    /// Get installed cooler (if any)
-    pub fn cooler(&self) -> Option<&Cooler> {
-        self.slots.iter().find_map(|s| match s {
-            ComponentSlotType::Cooler(slot) => slot.installed.as_ref(),
-            _ => None,
-        })
-    }
-
-    /// Get all installed RAM modules
-    pub fn rams(&self) -> Vec<&Ram> {
-        self.slots
-            .iter()
-            .filter_map(|s| match s {
-                ComponentSlotType::Ram(slot) => slot.installed.as_ref(),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Get total installed RAM capacity in MB
-    pub fn total_ram_mb(&self) -> u32 {
-        self.rams().iter().map(|r| r.capacity_mb).sum()
-    }
-
-    /// Get all installed storage devices
-    pub fn storages(&self) -> Vec<&Storage> {
-        self.slots
-            .iter()
-            .filter_map(|s| match s {
-                ComponentSlotType::Storage(slot) => slot.installed.as_ref(),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Get total storage capacity in MB
-    pub fn total_storage_mb(&self) -> u32 {
-        self.storages().iter().map(|s| s.capacity_mb).sum()
-    }
-
-    /// Get all installed network cards
-    pub fn networks(&self) -> Vec<&NetworkCard> {
-        self.slots
-            .iter()
-            .filter_map(|s| match s {
-                ComponentSlotType::Network(slot) => slot.installed.as_ref(),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Get best network speed in kbps
-    pub fn best_network_speed(&self) -> u32 {
-        self.networks()
-            .iter()
-            .map(|n| n.speed_kbps)
-            .max()
-            .unwrap_or(0)
-    }
-
-    /// Get effective CPU frequency considering cooler
-    pub fn effective_cpu_freq(&self) -> u32 {
-        let Some(cpu) = self.cpu() else { return 0 };
-        let cooler_tdp = self.cooler().map_or(0, |c| c.max_tdp);
-        cpu.effective_freq(cooler_tdp)
-    }
-
-    /// Get compute power score
-    pub fn compute_power(&self) -> u32 {
-        let Some(cpu) = self.cpu() else { return 0 };
-        let cooler_tdp = self.cooler().map_or(0, |c| c.max_tdp);
-        cpu.compute_power(cooler_tdp)
-    }
-
-    /// Get memory bandwidth score
-    #[allow(clippy::cast_possible_truncation)]
-    pub fn memory_score(&self) -> u32 {
-        let rams = self.rams();
-        if rams.is_empty() {
-            return 0;
-        }
-        let total_capacity: u32 = rams.iter().map(|r| r.capacity_mb).sum();
-        let avg_speed: u32 = rams.iter().map(|r| r.speed_mhz).sum::<u32>() / rams.len() as u32;
-        total_capacity / 256 * avg_speed / 1000
-    }
-
-    /// Get storage speed score
-    pub fn storage_score(&self) -> u32 {
-        self.storages()
-            .iter()
-            .map(|s| u32::midpoint(s.read_speed_mbps, s.write_speed_mbps))
-            .max()
-            .unwrap_or(0)
-    }
-
-    /// Overall power score for tool effectiveness
-    pub fn overall_power(&self) -> u32 {
-        self.compute_power() + self.memory_score() + self.storage_score() / 10
     }
 }
 
@@ -786,28 +535,82 @@ pub fn format_speed(kbps: u32) -> String {
     }
 }
 
-/// Player's component inventory (purchased but not installed)
+/// A component owned by the player with installation state
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedComponent {
+    pub component: HardwareComponent,
+    pub installed: bool,
+}
+
+/// Represents a grouped view of inventory items for display
+/// Installed items are shown individually, spare items of same model are grouped
+#[derive(Debug, Clone)]
+pub struct DisplayGroup {
+    /// The absolute indices of items in this group
+    pub indices: Vec<usize>,
+    /// The component (representative, all items in group have same id)
+    pub component: HardwareComponent,
+    /// Whether these items are installed (groups only contain items with same install state)
+    pub installed: bool,
+}
+
+impl DisplayGroup {
+    /// Get the count of items in this group
+    pub const fn count(&self) -> usize {
+        self.indices.len()
+    }
+
+    /// Get the first index (for operations on the group)
+    pub fn first_index(&self) -> usize {
+        self.indices[0]
+    }
+}
+
+/// Player's component inventory - single source of truth for all owned items
+/// Items are never removed, only added.
 #[derive(Debug, Clone, Default)]
 pub struct ComponentInventory {
-    items: Vec<HardwareComponent>,
+    items: Vec<OwnedComponent>,
 }
 
 impl ComponentInventory {
+    /// Add a new component to inventory (purchased from shop)
     pub fn add(&mut self, component: HardwareComponent) {
-        self.items.push(component);
+        self.items.push(OwnedComponent {
+            component,
+            installed: false,
+        });
     }
 
-    /// Remove a component by kind and index within that kind
-    pub fn remove_at(&mut self, kind: HardwareKind, index: usize) -> Option<HardwareComponent> {
-        // Find the actual index in the items vec
-        let actual_index = self
-            .items
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.kind() == kind)
-            .nth(index)
-            .map(|(i, _)| i)?;
-        Some(self.items.remove(actual_index))
+    /// Get an item by absolute index
+    pub fn get(&self, index: usize) -> Option<&HardwareComponent> {
+        self.items.get(index).map(|o| &o.component)
+    }
+
+    /// Check if an item at the given absolute index is installed
+    pub fn is_installed(&self, index: usize) -> bool {
+        self.items.get(index).is_some_and(|o| o.installed)
+    }
+
+    /// Mark an item as installed
+    pub fn install(&mut self, index: usize) {
+        if let Some(item) = self.items.get_mut(index) {
+            item.installed = true;
+        }
+    }
+
+    /// Mark an item as not installed (spare)
+    pub fn uninstall(&mut self, index: usize) {
+        if let Some(item) = self.items.get_mut(index) {
+            item.installed = false;
+        }
+    }
+
+    /// Toggle installed state
+    pub fn toggle_installed(&mut self, index: usize) {
+        if let Some(item) = self.items.get_mut(index) {
+            item.installed = !item.installed;
+        }
     }
 
     pub const fn is_empty(&self) -> bool {
@@ -819,16 +622,38 @@ impl ComponentInventory {
     }
 
     pub fn count_items_for(&self, kind: HardwareKind) -> usize {
-        self.items.iter().filter(|c| c.kind() == kind).count()
+        self.items
+            .iter()
+            .filter(|o| o.component.kind() == kind)
+            .count()
     }
 
-    /// Get an iterator over items for a hardware kind
-    pub fn items_for(&self, kind: HardwareKind) -> impl Iterator<Item = &HardwareComponent> {
-        self.items.iter().filter(move |c| c.kind() == kind)
+    /// Get an iterator over (`absolute_index`, item) for a hardware kind
+    pub fn items_for(
+        &self,
+        kind: HardwareKind,
+    ) -> impl Iterator<Item = (usize, &HardwareComponent)> {
+        self.items
+            .iter()
+            .enumerate()
+            .filter(move |(_, o)| o.component.kind() == kind)
+            .map(|(i, o)| (i, &o.component))
     }
 
-    /// Get a specific item by kind and index (within that kind)
-    pub fn get_at(&self, kind: HardwareKind, index: usize) -> Option<&HardwareComponent> {
+    /// Get an iterator over (`absolute_index`, item, `is_installed`) for a hardware kind
+    pub fn items_for_display(
+        &self,
+        kind: HardwareKind,
+    ) -> impl Iterator<Item = (usize, &HardwareComponent, bool)> {
+        self.items
+            .iter()
+            .enumerate()
+            .filter(move |(_, o)| o.component.kind() == kind)
+            .map(|(i, o)| (i, &o.component, o.installed))
+    }
+
+    /// Get a specific item by kind and index within that kind
+    pub fn get_at(&self, kind: HardwareKind, index: usize) -> Option<(usize, &HardwareComponent)> {
         self.items_for(kind).nth(index)
     }
 
@@ -836,148 +661,290 @@ impl ComponentInventory {
     pub fn has_motherboard(&self, mb_id: &str) -> bool {
         self.items
             .iter()
-            .any(|c| matches!(c, HardwareComponent::Motherboard(m) if m.id == mb_id))
+            .any(|o| matches!(&o.component, HardwareComponent::Motherboard(m) if m.id == mb_id))
     }
 
-    /// Count items that are equal to the given component
-    pub fn count_matching(&self, item: &HardwareComponent) -> usize {
-        self.items.iter().filter(|c| *c == item).count()
-    }
-
-    /// Get first motherboard in inventory (if any)
-    pub fn first_motherboard(&self) -> Option<&Motherboard> {
-        self.items.iter().find_map(|c| match c {
-            HardwareComponent::Motherboard(m) => Some(m),
-            _ => None,
+    /// Get the installed motherboard (if any)
+    pub fn installed_motherboard(&self) -> Option<&Motherboard> {
+        self.items.iter().find_map(|o| {
+            if o.installed {
+                match &o.component {
+                    HardwareComponent::Motherboard(m) => Some(m),
+                    _ => None,
+                }
+            } else {
+                None
+            }
         })
     }
-}
 
-/// PC with optional motherboard (motherboard contains all component slots)
-#[derive(Debug, Clone, Default)]
-pub struct PC {
-    pub motherboard: Option<Motherboard>,
-}
-
-impl PC {
-    /// Create from a motherboard
-    pub const fn from_motherboard(motherboard: Motherboard) -> Self {
-        Self {
-            motherboard: Some(motherboard),
-        }
+    /// Get the index of the installed motherboard (if any)
+    pub fn installed_motherboard_idx(&self) -> Option<usize> {
+        self.items.iter().enumerate().find_map(|(i, o)| {
+            if o.installed && matches!(&o.component, HardwareComponent::Motherboard(_)) {
+                Some(i)
+            } else {
+                None
+            }
+        })
     }
 
-    /// Get the motherboard if the PC is functional
-    pub fn functional_motherboard(&self) -> Option<&Motherboard> {
-        self.motherboard.as_ref().filter(|mb| mb.is_functional())
+    /// Count installed items of a specific kind
+    pub fn count_installed(&self, kind: HardwareKind) -> usize {
+        self.items
+            .iter()
+            .filter(|o| o.installed && o.component.kind() == kind)
+            .count()
     }
 
-    /// Check if PC is functional (motherboard exists and has required components)
+    /// Get all installed items of a specific kind
+    pub fn installed_of_kind(
+        &self,
+        kind: HardwareKind,
+    ) -> impl Iterator<Item = &HardwareComponent> {
+        self.items
+            .iter()
+            .filter(move |o| o.installed && o.component.kind() == kind)
+            .map(|o| &o.component)
+    }
+
+    /// Check if PC is functional (has motherboard and required components installed)
     pub fn is_functional(&self) -> bool {
-        self.motherboard
-            .as_ref()
-            .is_some_and(Motherboard::is_functional)
+        self.installed_motherboard().is_some()
+            && self.count_installed(HardwareKind::Cpu) >= 1
+            && self.count_installed(HardwareKind::Cooler) >= 1
+            && self.count_installed(HardwareKind::Ram) >= 1
+            && self.count_installed(HardwareKind::Storage) >= 1
+            && self.count_installed(HardwareKind::Network) >= 1
     }
 
-    /// Check if a component can be installed (without modifying anything)
+    /// Check if a component can be installed
     /// Returns Ok(()) if installable, Err with reason if not
-    pub fn can_install(&self, component: &HardwareComponent) -> Result<(), String> {
-        // Motherboards can always be installed (replaces existing)
-        if matches!(component, HardwareComponent::Motherboard(_)) {
+    pub fn can_install(&self, index: usize) -> Result<(), String> {
+        let owned = self.items.get(index).ok_or("Invalid index")?;
+
+        if owned.installed {
+            return Err("Already installed".to_string());
+        }
+
+        // Motherboards can always be installed (will uninstall existing)
+        if matches!(&owned.component, HardwareComponent::Motherboard(_)) {
             return Ok(());
         }
 
         // For other components, need a motherboard first
         let mb = self
-            .motherboard
-            .as_ref()
+            .installed_motherboard()
             .ok_or("No motherboard installed")?;
 
-        // Check if there's a compatible slot
-        if mb.count_empty_compatible_slots(component) == 0 {
-            let kind = component.kind();
-            if mb.empty_count(kind) == 0 {
-                return Err(format!("All {} slots are full", kind.name()));
-            }
-            return Err(format!("Not compatible with any {} slot", kind.name()));
+        // Check if there's a compatible slot available
+        let kind = owned.component.kind();
+        let installed_count = self.count_installed(kind);
+        let compatible_slots = mb.count_compatible_slots(&owned.component);
+
+        if compatible_slots == 0 {
+            return Err("Not compatible with this motherboard".to_string());
+        }
+
+        if installed_count >= compatible_slots {
+            return Err(format!("All compatible {} slots are full", kind.name()));
         }
 
         Ok(())
     }
 
-    /// Preview warnings when installing a component (informational only)
-    pub fn install_warnings(&self, component: &HardwareComponent) -> Vec<String> {
-        let mut warnings = Vec::new();
+    /// Install an item, uninstalling conflicting items if needed
+    /// Returns list of uninstalled item indices
+    pub fn install_item(&mut self, index: usize) -> Result<Vec<usize>, String> {
+        self.can_install(index)?;
 
-        // Check if installation is blocked
-        if let Err(reason) = self.can_install(component) {
-            warnings.push(format!("✗ BLOCKED: {reason}"));
-            return warnings;
+        let is_motherboard = matches!(
+            &self.items[index].component,
+            HardwareComponent::Motherboard(_)
+        );
+        let mut uninstalled = Vec::new();
+
+        // If installing a motherboard, uninstall all other components first
+        if is_motherboard {
+            // Uninstall existing motherboard and all other components
+            for (i, item) in self.items.iter_mut().enumerate() {
+                if item.installed {
+                    item.installed = false;
+                    uninstalled.push(i);
+                }
+            }
         }
 
-        warnings
+        self.items[index].installed = true;
+        Ok(uninstalled)
     }
 
-    /// Install a component into the PC
-    /// IMPORTANT: Call `can_install` first to verify this will succeed
-    pub fn install_component(&mut self, component: HardwareComponent) -> Option<HardwareComponent> {
-        // Special case: installing a motherboard
-        if let HardwareComponent::Motherboard(new_mb) = component {
-            return self
-                .motherboard
-                .replace(new_mb)
-                .map(HardwareComponent::Motherboard);
-        }
-
-        // For other components, install into motherboard
-        let mb = self
-            .motherboard
-            .as_mut()
-            .expect("can_install should have been called first");
-        let slot = mb
-            .find_empty_compatible_slot(&component)
-            .expect("can_install should have been called first");
-
-        // Install returns the old component (if any), but for empty slots this is always None
-        slot.install(component)
-    }
-
-    /// Uninstall a component from a specific slot index
-    pub fn uninstall_at(&mut self, slot_index: usize) -> Option<HardwareComponent> {
-        self.motherboard.as_mut()?.uninstall_at(slot_index)
-    }
-
-    /// Get compute power (0 if not functional)
-    pub fn compute_power(&self) -> u32 {
-        self.motherboard
-            .as_ref()
-            .map_or(0, Motherboard::compute_power)
-    }
-
-    /// Get CPU if installed
+    /// Get installed CPU (if any)
     pub fn cpu(&self) -> Option<&Cpu> {
-        self.motherboard.as_ref().and_then(|mb| mb.cpu())
+        self.installed_of_kind(HardwareKind::Cpu)
+            .find_map(|c| match c {
+                HardwareComponent::Cpu(cpu) => Some(cpu),
+                _ => None,
+            })
     }
 
-    /// Get cooler if installed
+    /// Get installed cooler (if any)
     pub fn cooler(&self) -> Option<&Cooler> {
-        self.motherboard.as_ref().and_then(|mb| mb.cooler())
+        self.installed_of_kind(HardwareKind::Cooler)
+            .find_map(|c| match c {
+                HardwareComponent::Cooler(cooler) => Some(cooler),
+                _ => None,
+            })
     }
 
     /// Get all installed RAM
     pub fn rams(&self) -> Vec<&Ram> {
-        self.motherboard
-            .as_ref()
-            .map_or_else(Vec::new, |mb| mb.rams())
+        self.installed_of_kind(HardwareKind::Ram)
+            .filter_map(|c| match c {
+                HardwareComponent::Ram(r) => Some(r),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Get all installed storage
+    pub fn storages(&self) -> Vec<&Storage> {
+        self.installed_of_kind(HardwareKind::Storage)
+            .filter_map(|c| match c {
+                HardwareComponent::Storage(s) => Some(s),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Get all installed network cards
+    pub fn networks(&self) -> Vec<&NetworkCard> {
+        self.installed_of_kind(HardwareKind::Network)
+            .filter_map(|c| match c {
+                HardwareComponent::Network(n) => Some(n),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Get total installed RAM capacity in MB
+    pub fn total_ram_mb(&self) -> u32 {
+        self.rams().iter().map(|r| r.capacity_mb).sum()
+    }
+
+    /// Get total storage capacity in MB
+    pub fn total_storage_mb(&self) -> u32 {
+        self.storages().iter().map(|s| s.capacity_mb).sum()
+    }
+
+    /// Get best network speed in kbps
+    pub fn best_network_speed(&self) -> u32 {
+        self.networks()
+            .iter()
+            .map(|n| n.speed_kbps)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Get compute power score
+    pub fn compute_power(&self) -> u32 {
+        let Some(cpu) = self.cpu() else { return 0 };
+        let cooler_tdp = self.cooler().map_or(0, |c| c.max_tdp);
+        cpu.compute_power(cooler_tdp)
+    }
+
+    /// Get memory bandwidth score
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn memory_score(&self) -> u32 {
+        let rams = self.rams();
+        if rams.is_empty() {
+            return 0;
+        }
+        let total_capacity: u32 = rams.iter().map(|r| r.capacity_mb).sum();
+        let avg_speed: u32 = rams.iter().map(|r| r.speed_mhz).sum::<u32>() / rams.len() as u32;
+        total_capacity / 256 * avg_speed / 1000
+    }
+
+    /// Get storage speed score
+    pub fn storage_score(&self) -> u32 {
+        self.storages()
+            .iter()
+            .map(|s| u32::midpoint(s.read_speed_mbps, s.write_speed_mbps))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Overall power score for tool effectiveness
+    pub fn overall_power(&self) -> u32 {
+        self.compute_power() + self.memory_score() + self.storage_score() / 10
+    }
+
+    /// Get effective CPU frequency considering cooler
+    pub fn effective_cpu_freq(&self) -> u32 {
+        let Some(cpu) = self.cpu() else { return 0 };
+        let cooler_tdp = self.cooler().map_or(0, |c| c.max_tdp);
+        cpu.effective_freq(cooler_tdp)
+    }
+
+    /// Get a sorted and grouped view for display
+    /// - Installed items shown individually (sorted by name)
+    /// - Non-installed items grouped by component ID (sorted by name)
+    /// - Installed items come first, then spare groups
+    pub fn grouped_display(&self, kind: HardwareKind) -> Vec<DisplayGroup> {
+        use std::collections::HashMap;
+
+        let mut result = Vec::new();
+        let mut spare_groups: HashMap<&str, Vec<usize>> = HashMap::new();
+
+        for (i, owned) in self.items.iter().enumerate() {
+            if owned.component.kind() != kind {
+                continue;
+            }
+
+            if owned.installed {
+                result.push(DisplayGroup {
+                    indices: vec![i],
+                    component: owned.component.clone(),
+                    installed: true,
+                });
+            } else {
+                spare_groups
+                    .entry(owned.component.id())
+                    .or_default()
+                    .push(i);
+            }
+        }
+
+        // Convert spare groups to DisplayGroups
+        let spare: Vec<DisplayGroup> = spare_groups
+            .into_values()
+            .map(|indices| {
+                let component = self.items[indices[0]].component.clone();
+                DisplayGroup {
+                    indices,
+                    component,
+                    installed: false,
+                }
+            })
+            .collect();
+
+        // Sort spare by name
+
+        // Installed first, then spare
+        result.extend(spare);
+        result.sort_by(|a, b| a.component.price().cmp(&b.component.price()));
+        result
     }
 }
 
 impl ComponentInventory {
-    /// Find index of best compatible CPU (highest compute power)
-    pub fn best_cpu_index(&self, socket: Option<CpuSocket>) -> Option<usize> {
-        self.items_for(HardwareKind::Cpu)
+    /// Find absolute index of best compatible spare CPU (highest compute power)
+    pub fn best_spare_cpu_index(&self, socket: Option<CpuSocket>) -> Option<usize> {
+        self.items
+            .iter()
             .enumerate()
-            .filter_map(|(i, c)| match c {
+            .filter(|(_, o)| !o.installed && o.component.kind() == HardwareKind::Cpu)
+            .filter_map(|(i, o)| match &o.component {
                 HardwareComponent::Cpu(cpu) if socket.is_none() || socket == Some(cpu.socket) => {
                     Some((i, cpu))
                 }
@@ -987,11 +954,13 @@ impl ComponentInventory {
             .map(|(i, _)| i)
     }
 
-    /// Find index of best compatible cooler (highest TDP support)
-    pub fn best_cooler_index(&self, socket: Option<CpuSocket>) -> Option<usize> {
-        self.items_for(HardwareKind::Cooler)
+    /// Find absolute index of best compatible spare cooler (highest TDP support)
+    pub fn best_spare_cooler_index(&self, socket: Option<CpuSocket>) -> Option<usize> {
+        self.items
+            .iter()
             .enumerate()
-            .filter_map(|(i, c)| match c {
+            .filter(|(_, o)| !o.installed && o.component.kind() == HardwareKind::Cooler)
+            .filter_map(|(i, o)| match &o.component {
                 HardwareComponent::Cooler(cooler)
                     if socket.is_none() || socket.is_some_and(|s| cooler.is_compatible(s)) =>
                 {
@@ -1003,11 +972,13 @@ impl ComponentInventory {
             .map(|(i, _)| i)
     }
 
-    /// Find index of best compatible RAM (highest capacity)
-    pub fn best_ram_index(&self, ram_type: Option<RamType>) -> Option<usize> {
-        self.items_for(HardwareKind::Ram)
+    /// Find absolute index of best compatible spare RAM (highest capacity)
+    pub fn best_spare_ram_index(&self, ram_type: Option<RamType>) -> Option<usize> {
+        self.items
+            .iter()
             .enumerate()
-            .filter_map(|(i, c)| match c {
+            .filter(|(_, o)| !o.installed && o.component.kind() == HardwareKind::Ram)
+            .filter_map(|(i, o)| match &o.component {
                 HardwareComponent::Ram(ram)
                     if ram_type.is_none() || ram_type == Some(ram.ram_type) =>
                 {
@@ -1019,11 +990,13 @@ impl ComponentInventory {
             .map(|(i, _)| i)
     }
 
-    /// Find index of best storage (highest capacity)
-    pub fn best_storage_index(&self) -> Option<usize> {
-        self.items_for(HardwareKind::Storage)
+    /// Find absolute index of best spare storage (highest capacity)
+    pub fn best_spare_storage_index(&self) -> Option<usize> {
+        self.items
+            .iter()
             .enumerate()
-            .filter_map(|(i, c)| match c {
+            .filter(|(_, o)| !o.installed && o.component.kind() == HardwareKind::Storage)
+            .filter_map(|(i, o)| match &o.component {
                 HardwareComponent::Storage(s) => Some((i, s)),
                 _ => None,
             })
@@ -1031,11 +1004,13 @@ impl ComponentInventory {
             .map(|(i, _)| i)
     }
 
-    /// Find index of best network (highest speed)
-    pub fn best_network_index(&self) -> Option<usize> {
-        self.items_for(HardwareKind::Network)
+    /// Find absolute index of best spare network (highest speed)
+    pub fn best_spare_network_index(&self) -> Option<usize> {
+        self.items
+            .iter()
             .enumerate()
-            .filter_map(|(i, c)| match c {
+            .filter(|(_, o)| !o.installed && o.component.kind() == HardwareKind::Network)
+            .filter_map(|(i, o)| match &o.component {
                 HardwareComponent::Network(n) => Some((i, n)),
                 _ => None,
             })
@@ -1218,31 +1193,25 @@ pub static MOTHERBOARDS: LazyLock<Vec<Motherboard>> = LazyLock::new(|| {
             slots: vec![
                 ComponentSlotType::Cpu(CpuSlot {
                     socket: CpuSocket::Socket478,
-                    installed: None,
                 }),
                 ComponentSlotType::Cooler(CoolerSlot {
                     compatible_sockets: &[CpuSocket::Socket478],
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR3,
                     max_capacity_mb: 1024,
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR3,
                     max_capacity_mb: 1024,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::IDE,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::IDE,
-                    installed: None,
                 }),
-                ComponentSlotType::Network(NetworkSlot { installed: None }),
+                ComponentSlotType::Network(NetworkSlot),
             ],
             price: 0,
         },
@@ -1253,45 +1222,36 @@ pub static MOTHERBOARDS: LazyLock<Vec<Motherboard>> = LazyLock::new(|| {
             slots: vec![
                 ComponentSlotType::Cpu(CpuSlot {
                     socket: CpuSocket::LGA775,
-                    installed: None,
                 }),
                 ComponentSlotType::Cooler(CoolerSlot {
                     compatible_sockets: &[CpuSocket::LGA775],
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR3,
                     max_capacity_mb: 2048,
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR3,
                     max_capacity_mb: 2048,
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR3,
                     max_capacity_mb: 2048,
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR3,
                     max_capacity_mb: 2048,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::SATA,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::SATA,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::SATA,
-                    installed: None,
                 }),
-                ComponentSlotType::Network(NetworkSlot { installed: None }),
+                ComponentSlotType::Network(NetworkSlot),
             ],
             price: 800,
         },
@@ -1302,50 +1262,40 @@ pub static MOTHERBOARDS: LazyLock<Vec<Motherboard>> = LazyLock::new(|| {
             slots: vec![
                 ComponentSlotType::Cpu(CpuSlot {
                     socket: CpuSocket::LGA1200,
-                    installed: None,
                 }),
                 ComponentSlotType::Cooler(CoolerSlot {
                     compatible_sockets: &[CpuSocket::LGA1200],
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR4,
                     max_capacity_mb: 32768,
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR4,
                     max_capacity_mb: 32768,
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR4,
                     max_capacity_mb: 32768,
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR4,
                     max_capacity_mb: 32768,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::NVMe,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::NVMe,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::SATA,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::SATA,
-                    installed: None,
                 }),
-                ComponentSlotType::Network(NetworkSlot { installed: None }),
-                ComponentSlotType::Network(NetworkSlot { installed: None }),
+                ComponentSlotType::Network(NetworkSlot),
+                ComponentSlotType::Network(NetworkSlot),
             ],
             price: 2500,
         },
@@ -1356,50 +1306,40 @@ pub static MOTHERBOARDS: LazyLock<Vec<Motherboard>> = LazyLock::new(|| {
             slots: vec![
                 ComponentSlotType::Cpu(CpuSlot {
                     socket: CpuSocket::LGA1700,
-                    installed: None,
                 }),
                 ComponentSlotType::Cooler(CoolerSlot {
                     compatible_sockets: &[CpuSocket::LGA1700],
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR5,
                     max_capacity_mb: 65536,
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR5,
                     max_capacity_mb: 65536,
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR5,
                     max_capacity_mb: 65536,
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR5,
                     max_capacity_mb: 65536,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::NVMe,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::NVMe,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::SATA,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::SATA,
-                    installed: None,
                 }),
-                ComponentSlotType::Network(NetworkSlot { installed: None }),
-                ComponentSlotType::Network(NetworkSlot { installed: None }),
+                ComponentSlotType::Network(NetworkSlot),
+                ComponentSlotType::Network(NetworkSlot),
             ],
             price: 4000,
         },
@@ -1410,50 +1350,40 @@ pub static MOTHERBOARDS: LazyLock<Vec<Motherboard>> = LazyLock::new(|| {
             slots: vec![
                 ComponentSlotType::Cpu(CpuSlot {
                     socket: CpuSocket::AM4,
-                    installed: None,
                 }),
                 ComponentSlotType::Cooler(CoolerSlot {
                     compatible_sockets: &[CpuSocket::AM4],
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR4,
                     max_capacity_mb: 32768,
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR4,
                     max_capacity_mb: 32768,
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR4,
                     max_capacity_mb: 32768,
-                    installed: None,
                 }),
                 ComponentSlotType::Ram(RamSlot {
                     ram_type: RamType::DDR4,
                     max_capacity_mb: 32768,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::NVMe,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::NVMe,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::SATA,
-                    installed: None,
                 }),
                 ComponentSlotType::Storage(StorageSlot {
                     slot_type: StorageSlotType::SATA,
-                    installed: None,
                 }),
-                ComponentSlotType::Network(NetworkSlot { installed: None }),
-                ComponentSlotType::Network(NetworkSlot { installed: None }),
+                ComponentSlotType::Network(NetworkSlot),
+                ComponentSlotType::Network(NetworkSlot),
             ],
             price: 2000,
         },
@@ -1467,7 +1397,7 @@ pub static RAMS: &[Ram] = &[
         ram_type: RamType::DDR3,
         capacity_mb: 512,
         speed_mhz: 800,
-        price: 0,
+        price: 250,
     },
     Ram {
         id: "ddr3_2048",
@@ -1535,7 +1465,7 @@ pub static STORAGES: &[Storage] = &[
         capacity_mb: 1024,
         read_speed_mbps: 10,
         write_speed_mbps: 8,
-        price: 0,
+        price: 100,
     },
     Storage {
         id: "hdd_20gb",

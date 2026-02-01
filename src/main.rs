@@ -96,10 +96,14 @@ async fn main() -> anyhow::Result<()> {
                         handle_shop_enter(&mut app);
                     }
                     KeyCode::Backspace if app.shop_tab == ShopTab::Owned => {
-                        // Uninstall current component from PC
-                        let kind = app.shop_category;
-                        if let Some(name) = app.player.uninstall_component(kind) {
-                            app.log(format!("Uninstalled {} - moved to inventory", name));
+                        // Toggle install state of selected component using grouped display
+                        let groups = app.player.inventory.grouped_display(app.shop_category);
+                        if let Some(group) = groups.get(app.shop_selection) {
+                            let abs_idx = group.first_index();
+                            match app.player.toggle_install(abs_idx) {
+                                Ok(msg) => app.log(msg),
+                                Err(msg) => app.log(format!("Error: {msg}")),
+                            }
                         }
                     }
                     _ => {}
@@ -208,7 +212,8 @@ async fn main() -> anyhow::Result<()> {
 fn get_item_count(app: &App) -> usize {
     match app.shop_tab {
         ShopTab::Available => Shop::count_items_for(app.shop_category),
-        ShopTab::Owned => app.player.inventory.count_items_for(app.shop_category),
+        // Use grouped display count - this accounts for grouped spare items
+        ShopTab::Owned => app.player.inventory.grouped_display(app.shop_category).len(),
     }
 }
 
@@ -235,23 +240,14 @@ fn handle_shop_enter(app: &mut App) {
             }
         }
         ShopTab::Owned => {
-            // Install component from inventory
-            match app
-                .player
-                .install_from_inventory(app.shop_category, app.shop_selection)
-            {
-                Ok(warnings) => {
-                    app.log("Component installed");
-                    for w in &warnings {
-                        app.log(format!("  ⚠ {}", w));
-                    }
-                    // Reset selection if needed
-                    let count = get_item_count(app);
-                    if app.shop_selection >= count {
-                        app.shop_selection = count.saturating_sub(1);
-                    }
+            // Use grouped display to get the correct inventory index
+            let groups = app.player.inventory.grouped_display(app.shop_category);
+            if let Some(group) = groups.get(app.shop_selection) {
+                let abs_idx = group.first_index();
+                match app.player.toggle_install(abs_idx) {
+                    Ok(msg) => app.log(msg),
+                    Err(msg) => app.log(format!("Error: {}", msg)),
                 }
-                Err(msg) => app.log(format!("Error: {}", msg)),
             }
         }
     }

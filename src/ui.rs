@@ -5,7 +5,7 @@ use ratatui::{
         canvas::{Canvas, Line, Map, MapResolution},
     },
 };
-use std::fmt::Write;
+use std::fmt::Write as _;
 
 /// Convert a percentage (0.0-100.0) to u16 for gauge widgets
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -564,6 +564,8 @@ struct ShopDisplayItem {
     socket_info: Option<String>,
     warnings: Vec<String>,
     affordable: bool,
+    installed: bool,
+    count: usize, // Number of items in this group (1 for shop items and installed)
 }
 
 fn render_shop_items(f: &mut Frame, area: Rect, app: &App) {
@@ -582,8 +584,10 @@ fn render_shop_items(f: &mut Frame, area: Rect, app: &App) {
                         description: item.description(),
                         price: Some(item.price()),
                         socket_info: item.socket_info(),
-                        warnings: Shop::purchase_warnings(&app.player.pc, item),
+                        warnings: Shop::purchase_warnings(&app.player.inventory, item),
                         affordable: app.player.credits >= item.price(),
+                        installed: false,
+                        count: 1,
                     })
                     .collect();
                 (
@@ -594,15 +598,29 @@ fn render_shop_items(f: &mut Frame, area: Rect, app: &App) {
                 )
             }
             ShopTab::Owned => {
+                // Use grouped display: sorted and grouped by model for spare items
                 let items = inv
-                    .items_for(kind)
-                    .map(|c| ShopDisplayItem {
-                        name: c.name().to_string(),
-                        description: c.description(),
-                        price: None,
-                        socket_info: None,
-                        warnings: app.player.pc.install_warnings(c),
-                        affordable: true,
+                    .grouped_display(kind)
+                    .into_iter()
+                    .map(|group| {
+                        let warnings = if group.installed {
+                            Vec::new()
+                        } else {
+                            inv.can_install(group.first_index())
+                                .err()
+                                .into_iter()
+                                .collect()
+                        };
+                        ShopDisplayItem {
+                            name: group.component.name().to_string(),
+                            description: group.component.description(),
+                            price: None,
+                            socket_info: group.component.socket_info(),
+                            warnings,
+                            affordable: true,
+                            installed: group.installed,
+                            count: group.count(),
+                        }
                     })
                     .collect();
                 (
@@ -663,19 +681,30 @@ fn render_shop_list(
 }
 
 fn get_shop_item_list_lines(selected: bool, item: &ShopDisplayItem) -> (Vec<String>, Style) {
-    let prefix = if selected { "▶ " } else { "• " };
-    let mut lines = vec![if let Some(p) = item.price {
-        format!("{p}$ {prefix}{} [{}]", item.name, item.description)
+    let prefix = if selected { "> " } else { "  " };
+    let checkbox = if item.installed { "[x]" } else { "[ ]" };
+    let count_suffix = if item.count > 1 {
+        format!(" (x{})", item.count)
     } else {
-        format!("{prefix}{} [{}]", item.name, item.description)
+        String::new()
+    };
+    let mut lines = vec![if let Some(p) = item.price {
+        format!("{prefix}{p}$ {} [{}]", item.name, item.description)
+    } else {
+        format!(
+            "{prefix}{checkbox} {}{count_suffix} [{}]",
+            item.name, item.description
+        )
     }];
-    if let Some(ref info) = item.socket_info {
-        lines.push(format!("    Socket/Type: {info}"));
-    }
-    if !item.warnings.is_empty() {
-        lines.push(format!("    ⚠ {}", item.warnings.join("; ")));
-    }
 
+    let warnings_str = if item.warnings.is_empty() {
+        String::new()
+    } else {
+        format!("⚠ {}", item.warnings.join("; "))
+    };
+    if let Some(ref info) = item.socket_info {
+        lines.push(format!("    Socket/Type: {info} {warnings_str}"));
+    }
     // Determine style
     let style = if selected {
         Style::default()
@@ -701,8 +730,8 @@ fn get_shop_item_list_lines(selected: bool, item: &ShopDisplayItem) -> (Vec<Stri
 pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
     use ratatui::text::{Line, Span};
 
-    let pc = &app.player.pc;
-    let mb = pc.motherboard.as_ref();
+    let inv = &app.player.inventory;
+    let mb = inv.installed_motherboard();
 
     // Colors based on motherboard tier (or default if no motherboard)
     let (case_color, accent_color, led_color) = mb.map_or(
@@ -725,27 +754,31 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
     let net_style = Style::default().fg(Color::Green);
     let psu_style = Style::default().fg(Color::Yellow);
 
-    // Collect component info
+    // Collect component info from inventory
     let has_mb = mb.is_some();
-    let cpu_filled = mb.is_some_and(|m| m.filled_count(HardwareKind::Cpu) > 0);
-    let cooler_filled = mb.is_some_and(|m| m.filled_count(HardwareKind::Cooler) > 0);
-    let ram_filled = mb.map_or(0, |m| m.filled_count(HardwareKind::Ram));
+    let cpu_filled = inv.count_installed(HardwareKind::Cpu) > 0;
+    let cooler_filled = inv.count_installed(HardwareKind::Cooler) > 0;
+    let ram_filled = inv.count_installed(HardwareKind::Ram);
     let ram_total = mb.map_or(0, |m| m.slot_count(HardwareKind::Ram));
-    let storage_filled = mb.map_or(0, |m| m.filled_count(HardwareKind::Storage));
+    let storage_filled = inv.count_installed(HardwareKind::Storage);
     let storage_total = mb.map_or(0, |m| m.slot_count(HardwareKind::Storage));
-    let net_filled = mb.map_or(0, |m| m.filled_count(HardwareKind::Network));
-    let functional = pc.is_functional();
+    let net_filled = inv.count_installed(HardwareKind::Network);
+    let net_total = mb.map_or(0, |m| m.slot_count(HardwareKind::Network));
+    let functional = inv.is_functional();
 
     // Get component names for display
-    let cpu_name = pc
+    let cpu_name = inv
         .cpu()
         .map_or_else(|| "Empty".to_string(), |c| c.name.to_string());
-    let cooler_name = pc
+    let cooler_name = inv
         .cooler()
         .map_or_else(|| "None".to_string(), |c| c.name.to_string());
     let mb_name = mb.map_or_else(|| "No Motherboard".to_string(), |m| m.name.to_string());
-    let socket_name = mb
+    let cpu_socket_name = mb
         .and_then(crate::model::hardware::Motherboard::socket)
+        .map_or_else(|| "N/A".to_string(), |s| format!("{s}"));
+    let ram_socket_name = mb
+        .and_then(crate::model::hardware::Motherboard::ram_type)
         .map_or_else(|| "N/A".to_string(), |s| format!("{s}"));
 
     let mut lines = Vec::new();
@@ -806,37 +839,33 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
         lines.push(Line::from(vec![
             Span::styled("  ║", case_style),
             Span::styled(" ║ ", accent_style),
-            Span::styled("┌─────────────┐", cpu_style),
-            Span::styled("  RAM SLOTS        ", dim_style),
+            Span::styled("┌──────────────┐", cpu_style),
+            Span::styled("  RAM SLOTS       ", dim_style),
             Span::styled("║ ", accent_style),
             Span::styled("║", case_style),
         ]));
 
         // CPU with cooler visualization
         let cpu_art = if cooler_filled {
-            "│ ▓▓▓▓▓▓▓▓▓▓▓ │".to_string()
+            "│ ▓▓▓▓▓▓▓▓▓▓▓▓ │".to_string()
         } else if cpu_filled {
-            "│ ┌───────┐   │".to_string()
+            "│ ┌────────┐   │".to_string()
         } else {
-            "│ │       │   │".to_string()
+            format!("│ {cpu_socket_name:<13}│")
         };
         let cpu_color = if cpu_filled { cpu_style } else { dim_style };
 
         // RAM slot visualization
         let mut ram_slots = String::new();
-        for i in 0..4 {
-            if i < ram_total {
-                if i < ram_filled {
-                    ram_slots.push('█');
-                } else {
-                    ram_slots.push('░');
-                }
+        for i in 0..ram_total {
+            if i < ram_filled {
+                ram_slots.push('█');
             } else {
-                ram_slots.push(' ');
+                ram_slots.push('░');
             }
             ram_slots.push(' ');
         }
-        let ram_slots_display = format!("{ram_slots}         ║ ");
+        let ram_slots_display = format!("{ram_slots:<16}");
 
         lines.push(Line::from(vec![
             Span::styled("  ║", case_style),
@@ -844,16 +873,17 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
             Span::styled(cpu_art, cpu_color),
             Span::styled("  ", dim_style),
             Span::styled(ram_slots_display.clone(), ram_style),
+            Span::styled("║ ", accent_style),
             Span::styled("║", case_style),
         ]));
 
         // CPU label row
         let cpu_label = if cooler_filled {
-            "│   COOLER    │".to_string()
+            "│   COOLER     │".to_string()
         } else if cpu_filled {
-            "│ │  CPU  │   │".to_string()
+            "│ │  CPU   │   │".to_string()
         } else {
-            "│ │ EMPTY │   │".to_string()
+            "│ │ EMPTY  │   │".to_string()
         };
 
         lines.push(Line::from(vec![
@@ -862,16 +892,18 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
             Span::styled(cpu_label, cpu_color),
             Span::styled("  ", dim_style),
             Span::styled(ram_slots_display, ram_style),
+            Span::styled("║ ", accent_style),
             Span::styled("║", case_style),
         ]));
 
         // CPU bottom / socket info
-        let socket_display = format!("  {socket_name:<17}║ ");
+        let ram_socket_display = format!("  {ram_socket_name:<16}");
         lines.push(Line::from(vec![
             Span::styled("  ║", case_style),
             Span::styled(" ║ ", accent_style),
-            Span::styled("└─────────────┘", cpu_style),
-            Span::styled(socket_display, dim_style),
+            Span::styled("└──────────────┘", cpu_style),
+            Span::styled(ram_socket_display, dim_style),
+            Span::styled("║ ", accent_style),
             Span::styled("║", case_style),
         ]));
 
@@ -887,40 +919,62 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
             Span::styled("  ║", case_style),
             Span::styled(" ║ ", accent_style),
             Span::styled("STORAGE DRIVES", storage_style),
-            Span::styled("          ", dim_style),
-            Span::styled("NETWORK", net_style),
+            Span::styled("                 ", dim_style),
+            Span::styled("", net_style),
             Span::styled("   ║ ", accent_style),
             Span::styled("║", case_style),
         ]));
 
         // Storage drives visualization
         let mut storage_art = String::new();
-        for i in 0..4 {
-            if i < storage_total {
-                if i < storage_filled {
-                    storage_art.push_str("[▓▓▓]");
-                } else {
-                    storage_art.push_str("[   ]");
-                }
+        for i in 0..storage_total {
+            if i < storage_filled {
+                storage_art.push_str("[▓▓▓]");
+            } else {
+                storage_art.push_str("[   ]");
             }
         }
-        while storage_art.len() < 20 {
-            storage_art.push(' ');
-        }
-
-        // Network visualization
-        let net_art = if net_filled > 0 {
-            format!("◆{}        ║ ", "─".repeat(6))
-        } else {
-            format!("◇{}        ║ ", "╌".repeat(6))
-        };
-        let net_color = if net_filled > 0 { net_style } else { dim_style };
 
         lines.push(Line::from(vec![
             Span::styled("  ║", case_style),
             Span::styled(" ║ ", accent_style),
-            Span::styled(format!("{storage_art}     "), storage_style),
+            Span::styled(format!("{storage_art:<34}"), storage_style),
+            Span::styled("║ ", accent_style),
+            Span::styled("║", case_style),
+        ]));
+
+        // Spacer
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║                                   ║ ", accent_style),
+            Span::styled("║", case_style),
+        ]));
+
+        // Network section header
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║ ", accent_style),
+            Span::styled("NETWORK       ", net_style),
+            Span::styled("                 ", dim_style),
+            Span::styled("   ║ ", accent_style),
+            Span::styled("║", case_style),
+        ]));
+        // Network visualization
+        let mut net_slots = String::new();
+        for i in 0..net_total {
+            if i < net_filled {
+                net_slots.push_str("◆------        ");
+            } else {
+                net_slots.push_str("◇------        ");
+            }
+        }
+        let net_art = format!("{net_slots:<34}");
+        let net_color = if net_filled > 0 { net_style } else { dim_style };
+        lines.push(Line::from(vec![
+            Span::styled("  ║", case_style),
+            Span::styled(" ║ ", accent_style),
             Span::styled(net_art, net_color),
+            Span::styled("║ ", accent_style),
             Span::styled("║", case_style),
         ]));
     } else {
@@ -981,7 +1035,7 @@ pub fn render_large_pc_ascii(app: &App) -> Vec<ratatui::text::Line<'static>> {
     let psu_bar = if functional {
         "█████████████████████████████"
     } else {
-        "░░░░░░░░░░░░░░░░░░░░░░░░░░█░░"
+        "░░░░░░░░░░░░░░░░░░░░░░░░░░░░░"
     };
     let psu_bar_style = if functional {
         Style::default().fg(Color::Green)

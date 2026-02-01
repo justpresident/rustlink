@@ -1,6 +1,6 @@
 use crate::model::{
     COOLERS, CPUS, ComponentInventory, File, HardwareComponent, HardwareKind, MOTHERBOARDS, Mail,
-    Motherboard, NETWORKS, PC, RAMS, STORAGES,
+    Motherboard, NETWORKS, RAMS, STORAGES,
 };
 
 /// Player state for economy, inventory, and owned items
@@ -8,252 +8,182 @@ pub struct Player {
     pub credits: u32,
     pub local_files: Vec<File>,
     pub inbox: Vec<Mail>,
-    pub pc: PC,                        // Currently assembled PC (motherboard with slots)
-    pub inventory: ComponentInventory, // Owned components not yet installed
+    pub inventory: ComponentInventory, // All owned components, tracks what's installed
     pub owned_tools: Vec<String>,      // Software tools player owns
 }
 
 impl Player {
-    /// Get the motherboard if the assembled PC is functional
+    /// Get the installed motherboard if the PC is functional
     pub fn working_motherboard(&self) -> Option<&Motherboard> {
-        self.pc.functional_motherboard()
+        if self.inventory.is_functional() {
+            self.inventory.installed_motherboard()
+        } else {
+            None
+        }
     }
 
     /// Get compute power (0 if PC is incomplete/invalid)
     pub fn compute_power(&self) -> u32 {
-        self.pc.compute_power()
+        self.inventory.compute_power()
     }
 
     /// Check if the PC is functional
     pub fn pc_functional(&self) -> bool {
-        self.pc.is_functional()
+        self.inventory.is_functional()
     }
 
-    /// Get warnings when installing a new motherboard over existing parts
-    fn motherboard_install_warnings(&self, new_mb: &Motherboard) -> Vec<String> {
-        let mut warnings = Vec::new();
-        let new_socket = new_mb.socket();
-        let new_ram_type = new_mb.ram_type();
+    /// Toggle install state of a component by its absolute index in inventory
+    pub fn toggle_install(&mut self, index: usize) -> Result<String, String> {
+        let component = self.inventory.get(index).ok_or("Invalid index")?;
+        let name = component.name().to_string();
 
-        if let Some(cpu) = self.pc.cpu()
-            && let Some(socket) = new_socket
-            && cpu.socket != socket
-        {
-            warnings.push(format!(
-                "Warning: Installed CPU {} is incompatible",
-                cpu.name
-            ));
+        if self.inventory.is_installed(index) {
+            self.inventory.uninstall(index);
+            Ok(format!("Uninstalled {name}"))
+        } else {
+            self.inventory.install_item(index)?;
+            Ok(format!("Installed {name}"))
         }
-        if let Some(cooler) = self.pc.cooler()
-            && let Some(socket) = new_socket
-            && !cooler.is_compatible(socket)
-        {
-            warnings.push(format!(
-                "Warning: Installed cooler {} is incompatible",
-                cooler.name
-            ));
-        }
-        for ram in self.pc.rams() {
-            if let Some(ram_type) = new_ram_type
-                && ram.ram_type != ram_type
-            {
-                warnings.push(format!(
-                    "Warning: Installed RAM {} is incompatible",
-                    ram.name
-                ));
+    }
+
+    /// Install a component by its absolute index
+    pub fn install_component(&mut self, index: usize) -> Result<Vec<String>, String> {
+        let component = self.inventory.get(index).ok_or("Invalid index")?;
+        let name = component.name().to_string();
+        let kind = component.kind();
+
+        let uninstalled = self.inventory.install_item(index)?;
+
+        let mut warnings = Vec::new();
+        if !uninstalled.is_empty() {
+            for idx in uninstalled {
+                if let Some(c) = self.inventory.get(idx) {
+                    warnings.push(format!("Uninstalled {} (incompatible)", c.name()));
+                }
             }
         }
-        warnings
-    }
 
-    /// Install a component from inventory by index
-    /// Returns warnings (informational only - install always succeeds if Ok is returned)
-    pub fn install_from_inventory(
-        &mut self,
-        kind: HardwareKind,
-        index: usize,
-    ) -> Result<Vec<String>, String> {
-        // Get the component to check if it can be installed (without removing yet)
-        let component = self
-            .inventory
-            .get_at(kind, index)
-            .ok_or("Invalid inventory index")?;
-
-        // Check if it can be installed
-        self.pc.can_install(component)?;
-
-        // Now we know it will succeed - remove from inventory and install
-        let component = self
-            .inventory
-            .remove_at(kind, index)
-            .expect("index was valid");
-
-        // Get warnings for motherboard installs
-        let mut warnings = if let HardwareComponent::Motherboard(ref new_mb) = component {
-            self.motherboard_install_warnings(new_mb)
-        } else {
-            Vec::new()
-        };
-
-        // Install the component (old one goes to inventory if any)
-        if let Some(old) = self.pc.install_component(component) {
-            self.inventory.add(old);
+        // Auto-populate if we just installed a motherboard
+        if kind == HardwareKind::Motherboard {
+            self.auto_populate_slots(&mut warnings);
         }
 
-        // Auto-populate empty slots with compatible items
-        self.auto_populate_slots(&mut warnings);
-
+        warnings.insert(0, format!("Installed {name}"));
         Ok(warnings)
     }
 
-    /// Auto-populate empty PC slots with best compatible items from inventory
-    /// Motherboard is the base and determines compatibility - it's never auto-installed
+    /// Uninstall a component by its absolute index
+    pub fn uninstall_component(&mut self, index: usize) -> Result<String, String> {
+        let component = self.inventory.get(index).ok_or("Invalid index")?;
+        let name = component.name().to_string();
+
+        if !self.inventory.is_installed(index) {
+            return Err("Component is not installed".to_string());
+        }
+
+        self.inventory.uninstall(index);
+        Ok(format!("Uninstalled {name}"))
+    }
+
+    /// Auto-populate empty PC slots with best compatible spare items from inventory
     fn auto_populate_slots(&mut self, warnings: &mut Vec<String>) {
-        // Get motherboard specs - return early if no motherboard
-        let Some(mb) = &self.pc.motherboard else {
+        let Some(mb) = self.inventory.installed_motherboard() else {
             return;
         };
-        let (mb_socket, mb_ram_type) = (mb.socket(), mb.ram_type());
+        let mb_socket = mb.socket();
+        let mb_ram_type = mb.ram_type();
 
         // Try to fill CPU slot
-        if self.mb_needs(HardwareKind::Cpu) {
-            self.try_auto_install(warnings, HardwareKind::Cpu, |inv| {
-                inv.best_cpu_index(mb_socket)
-            });
+        if self.inventory.count_installed(HardwareKind::Cpu) == 0
+            && let Some(idx) = self.inventory.best_spare_cpu_index(mb_socket)
+            && self.inventory.install_item(idx).is_ok()
+            && let Some(c) = self.inventory.get(idx)
+        {
+            warnings.push(format!("Auto-installed CPU: {}", c.name()));
         }
 
         // Try to fill Cooler slot
-        if self.mb_needs(HardwareKind::Cooler) {
-            self.try_auto_install(warnings, HardwareKind::Cooler, |inv| {
-                inv.best_cooler_index(mb_socket)
-            });
+        if self.inventory.count_installed(HardwareKind::Cooler) == 0
+            && let Some(idx) = self.inventory.best_spare_cooler_index(mb_socket)
+            && self.inventory.install_item(idx).is_ok()
+            && let Some(c) = self.inventory.get(idx)
+        {
+            warnings.push(format!("Auto-installed Cooler: {}", c.name()));
         }
 
         // Try to fill RAM slots
-        while self.mb_has_empty(HardwareKind::Ram) {
-            if !self.try_auto_install(warnings, HardwareKind::Ram, |inv| {
-                inv.best_ram_index(mb_ram_type)
-            }) {
+        let mb = self.inventory.installed_motherboard();
+        let ram_slots = mb.map_or(0, |m| m.slot_count(HardwareKind::Ram));
+        while self.inventory.count_installed(HardwareKind::Ram) < ram_slots {
+            if let Some(idx) = self.inventory.best_spare_ram_index(mb_ram_type) {
+                if self.inventory.install_item(idx).is_ok() {
+                    if let Some(c) = self.inventory.get(idx) {
+                        warnings.push(format!("Auto-installed RAM: {}", c.name()));
+                    }
+                } else {
+                    break;
+                }
+            } else {
                 break;
             }
         }
 
         // Try to fill Storage slots
-        while self.mb_has_empty(HardwareKind::Storage) {
-            if !self.try_auto_install(warnings, HardwareKind::Storage, |inv| {
-                inv.best_storage_index()
-            }) {
+        let mb = self.inventory.installed_motherboard();
+        let storage_slots = mb.map_or(0, |m| m.slot_count(HardwareKind::Storage));
+        while self.inventory.count_installed(HardwareKind::Storage) < storage_slots {
+            if let Some(idx) = self.inventory.best_spare_storage_index() {
+                if self.inventory.install_item(idx).is_ok() {
+                    if let Some(c) = self.inventory.get(idx) {
+                        warnings.push(format!("Auto-installed Storage: {}", c.name()));
+                    }
+                } else {
+                    break;
+                }
+            } else {
                 break;
             }
         }
 
         // Try to fill Network slots
-        while self.mb_has_empty(HardwareKind::Network) {
-            if !self.try_auto_install(warnings, HardwareKind::Network, |inv| {
-                inv.best_network_index()
-            }) {
+        let mb = self.inventory.installed_motherboard();
+        let network_slots = mb.map_or(0, |m| m.slot_count(HardwareKind::Network));
+        while self.inventory.count_installed(HardwareKind::Network) < network_slots {
+            if let Some(idx) = self.inventory.best_spare_network_index() {
+                if self.inventory.install_item(idx).is_ok() {
+                    if let Some(c) = self.inventory.get(idx) {
+                        warnings.push(format!("Auto-installed Network: {}", c.name()));
+                    }
+                } else {
+                    break;
+                }
+            } else {
                 break;
             }
         }
     }
 
-    /// Helper: check if motherboard needs a component (has none installed)
-    fn mb_needs(&self, kind: HardwareKind) -> bool {
-        self.pc
-            .motherboard
-            .as_ref()
-            .is_some_and(|mb| mb.needs_component(kind))
-    }
-
-    /// Helper: check if motherboard has empty slots for a component kind
-    fn mb_has_empty(&self, kind: HardwareKind) -> bool {
-        self.pc
-            .motherboard
-            .as_ref()
-            .is_some_and(|mb| mb.has_empty_slot(kind))
-    }
-
-    /// Try to auto-install a component. Returns true if installed, false if nothing to install.
-    fn try_auto_install(
-        &mut self,
-        warnings: &mut Vec<String>,
-        kind: HardwareKind,
-        get_best_index: impl FnOnce(&ComponentInventory) -> Option<usize>,
-    ) -> bool {
-        let Some(index) = get_best_index(&self.inventory) else {
-            return false;
-        };
-
-        // Get component and check if it can be installed
-        let Some(component) = self.inventory.get_at(kind, index) else {
-            return false;
-        };
-
-        if self.pc.can_install(component).is_err() {
-            return false;
-        }
-
-        // Remove and install
-        let component = self.inventory.remove_at(kind, index).expect("valid index");
-        let name = component.name().to_string();
-        self.pc.install_component(component);
-        warnings.push(format!("Auto-installed {}: {name}", kind.name()));
-        true
-    }
-
-    /// Remove a component from assembled PC slot at given index and put it in inventory
-    pub fn uninstall_component_at(&mut self, slot_index: usize) -> Option<String> {
-        let component = self.pc.uninstall_at(slot_index)?;
-        let name = component.name().to_string();
-        self.inventory.add(component);
-        Some(name)
-    }
-
-    /// Uninstall first component of a given category and put it in inventory
-    pub fn uninstall_component(&mut self, kind: HardwareKind) -> Option<String> {
-        // For motherboard category, uninstall the entire motherboard
-        if kind == HardwareKind::Motherboard {
-            let old_mb = self.pc.motherboard.take()?;
-            let name = old_mb.name.to_string();
-            self.inventory.add(HardwareComponent::Motherboard(old_mb));
-            return Some(name);
-        }
-
-        let mb = self.pc.motherboard.as_mut()?;
-
-        // Find first filled slot of this category
-        let slot_idx = mb
-            .slots
-            .iter()
-            .position(|s| s.kind() == kind && s.is_filled())?;
-
-        let component = mb.uninstall_at(slot_idx)?;
-        let name = component.name().to_string();
-        self.inventory.add(component);
-        Some(name)
-    }
-
-    /// Check if player owns a specific motherboard (installed or in inventory)
+    /// Check if player owns a specific motherboard
     pub fn owns_motherboard(&self, mb_id: &str) -> bool {
-        if let Some(mb) = &self.pc.motherboard
-            && mb.id == mb_id
-        {
-            return true;
-        }
         self.inventory.has_motherboard(mb_id)
     }
 
     /// Count total owned components of a specific item
     pub fn count_owned_of(&self, item: &HardwareComponent) -> usize {
-        self.inventory.count_matching(item)
+        self.inventory.count_items_for(item.kind())
     }
 
     /// Get the current motherboard (installed or first in inventory)
     pub fn get_motherboard(&self) -> Option<&Motherboard> {
-        self.pc
-            .motherboard
-            .as_ref()
-            .or_else(|| self.inventory.first_motherboard())
+        self.inventory.installed_motherboard().or_else(|| {
+            self.inventory
+                .items_for(HardwareKind::Motherboard)
+                .next()
+                .and_then(|(_, c)| match c {
+                    HardwareComponent::Motherboard(m) => Some(m),
+                    _ => None,
+                })
+        })
     }
 }
 
@@ -265,48 +195,22 @@ impl Default for Player {
 
 impl Player {
     pub fn new(rich_player: bool) -> Self {
-        // Create starter motherboard with basic components installed
-        let mut starter_mb = MOTHERBOARDS[0].clone();
+        let mut inventory = ComponentInventory::default();
 
-        // Install starter components into the motherboard slots
-        for slot in &mut starter_mb.slots {
-            match slot {
-                crate::model::ComponentSlotType::Cpu(cpu_slot) => {
-                    cpu_slot.installed = Some(CPUS[0].clone());
-                }
-                crate::model::ComponentSlotType::Cooler(cooler_slot) => {
-                    cooler_slot.installed = Some(COOLERS[0].clone());
-                }
-                crate::model::ComponentSlotType::Ram(ram_slot) => {
-                    // Only install in first RAM slot
-                    if ram_slot.installed.is_none() {
-                        ram_slot.installed = Some(RAMS[0].clone());
-                        break; // Only install one RAM module initially
-                    }
-                }
-                _ => {}
-            }
-        }
-        // Install storage and network
-        for slot in &mut starter_mb.slots {
-            if let crate::model::ComponentSlotType::Storage(storage_slot) = slot
-                && storage_slot.installed.is_none()
-            {
-                storage_slot.installed = Some(STORAGES[0].clone());
-                break;
-            }
-        }
-        for slot in &mut starter_mb.slots {
-            if let crate::model::ComponentSlotType::Network(network_slot) = slot
-                && network_slot.installed.is_none()
-            {
-                network_slot.installed = Some(NETWORKS[0].clone());
-                break;
-            }
+        // Add starter components to inventory
+        inventory.add(HardwareComponent::Motherboard(MOTHERBOARDS[0].clone()));
+        inventory.add(HardwareComponent::Cpu(CPUS[0].clone()));
+        inventory.add(HardwareComponent::Cooler(COOLERS[0].clone()));
+        inventory.add(HardwareComponent::Ram(RAMS[0].clone()));
+        inventory.add(HardwareComponent::Storage(STORAGES[0].clone()));
+        inventory.add(HardwareComponent::Network(NETWORKS[0].clone()));
+
+        for i in 0..inventory.total_count() {
+            let _ = inventory.install_item(i);
         }
 
         Self {
-            credits: if rich_player {500_000} else {500},
+            credits: if rich_player { 500_000 } else { 500 },
             local_files: Vec::new(),
             inbox: vec![
                 Mail {
@@ -331,8 +235,7 @@ impl Player {
                     mission_id: Some(1),
                 },
             ],
-            pc: PC::from_motherboard(starter_mb),
-            inventory: ComponentInventory::default(),
+            inventory,
             owned_tools: vec!["PasswordBreaker".into(), "FirewallBuster".into()],
         }
     }
@@ -360,11 +263,9 @@ impl Player {
 
     /// Check if player's PC meets minimum requirements
     pub fn can_use_tool(&self, min_compute: u32, min_memory: u32) -> bool {
-        if let Some(mb) = self.working_motherboard() {
-            mb.compute_power() >= min_compute && mb.total_ram_mb() >= min_memory
-        } else {
-            false // PC not functional
-        }
+        self.inventory.is_functional()
+            && self.inventory.compute_power() >= min_compute
+            && self.inventory.total_ram_mb() >= min_memory
     }
 
     pub fn unread_mail_count(&self) -> usize {

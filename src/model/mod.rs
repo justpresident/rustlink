@@ -3,10 +3,10 @@ pub mod hardware;
 
 pub use hardware::{
     COOLERS, CPUS, ComponentInventory, ComponentSlotType, Cooler, CoolerSlot, CoolerType, Cpu,
-    CpuSlot, CpuSocket, HardwareComponent, HardwareKind, HardwareMaximums, MOTHERBOARDS,
-    Motherboard, MotherboardTier, NETWORKS, NetworkCard, NetworkSlot, NetworkType, PC, RAMS, Ram,
-    RamSlot, RamType, STORAGES, Storage, StorageSlot, StorageSlotType, StorageType, format_bytes,
-    format_speed,
+    CpuSlot, CpuSocket, DisplayGroup, HardwareComponent, HardwareKind, HardwareMaximums,
+    MOTHERBOARDS, Motherboard, MotherboardTier, NETWORKS, NetworkCard, NetworkSlot, NetworkType,
+    OwnedComponent, RAMS, Ram, RamSlot, RamType, STORAGES, Storage, StorageSlot, StorageSlotType,
+    StorageType, format_bytes, format_speed,
 };
 
 use crate::model::firewall::Firewall;

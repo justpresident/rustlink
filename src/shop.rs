@@ -3,7 +3,8 @@
 use std::sync::LazyLock;
 
 use crate::model::{
-    COOLERS, CPUS, HardwareComponent, HardwareKind, MOTHERBOARDS, NETWORKS, PC, RAMS, STORAGES,
+    COOLERS, CPUS, ComponentInventory, HardwareComponent, HardwareKind, MOTHERBOARDS, NETWORKS,
+    RAMS, STORAGES,
 };
 use crate::player::Player;
 
@@ -67,76 +68,131 @@ impl Shop {
 
     /// Get compatibility warnings for purchasing a component
     /// These are informational - they don't block purchase
-    pub fn purchase_warnings(pc: &PC, item: &HardwareComponent) -> Vec<String> {
+    /// Checks against ALL owned items (installed + spare), not just installed
+    #[allow(clippy::too_many_lines)]
+    pub fn purchase_warnings(inv: &ComponentInventory, item: &HardwareComponent) -> Vec<String> {
         let mut warnings = Vec::new();
 
         match item {
             HardwareComponent::Cpu(cpu) => {
-                if let Some(mb) = &pc.motherboard
-                    && let Some(mb_socket) = mb.socket()
-                    && cpu.socket != mb_socket
-                {
-                    warnings.push(format!(
-                        "Requires {} motherboard (you have {})",
-                        cpu.socket, mb_socket
-                    ));
+                // Check if ANY owned motherboard supports this CPU
+                let has_compatible_mb = inv
+                    .items_for(HardwareKind::Motherboard)
+                    .any(|(_, c)| matches!(c, HardwareComponent::Motherboard(m) if m.socket() == Some(cpu.socket)));
+
+                if !has_compatible_mb && inv.count_items_for(HardwareKind::Motherboard) > 0 {
+                    // Get installed MB socket for the warning message
+                    warnings.push(format!("Needs {} socket", cpu.socket));
                 }
-                if let Some(cooler) = pc.cooler() {
-                    if !cooler.is_compatible(cpu.socket) {
-                        warnings.push(format!("Your cooler doesn't support {} socket", cpu.socket));
+
+                // Check if ANY owned cooler supports this CPU socket and TDP
+                let coolers: Vec<_> = inv
+                    .items_for(HardwareKind::Cooler)
+                    .filter_map(|(_, c)| match c {
+                        HardwareComponent::Cooler(cooler) => Some(cooler),
+                        _ => None,
+                    })
+                    .collect();
+
+                if !coolers.is_empty() {
+                    let has_compatible_cooler = coolers.iter().any(|c| c.is_compatible(cpu.socket));
+                    if !has_compatible_cooler {
+                        warnings.push(format!("Needs cooler for {} socket", cpu.socket));
                     }
-                    if cpu.tdp_watts > cooler.max_tdp {
+
+                    let has_sufficient_tdp = coolers.iter().any(|c| c.max_tdp >= cpu.tdp_watts);
+                    if !has_sufficient_tdp {
+                        let best_tdp = coolers.iter().map(|c| c.max_tdp).max().unwrap_or(0);
                         warnings.push(format!(
-                            "TDP ({} W) exceeds your cooler ({} W) - will throttle",
-                            cpu.tdp_watts, cooler.max_tdp
+                            "TDP ({} W) exceeds all owned coolers (best: {} W) - will throttle",
+                            cpu.tdp_watts, best_tdp
                         ));
                     }
                 }
             }
             HardwareComponent::Cooler(cooler) => {
-                if let Some(mb) = &pc.motherboard
-                    && let Some(mb_socket) = mb.socket()
-                    && !cooler.is_compatible(mb_socket)
-                {
-                    warnings.push(format!("Doesn't support your {mb_socket} socket"));
+                // Check if ANY owned motherboard is compatible
+                let has_compatible_mb = inv.items_for(HardwareKind::Motherboard).any(|(_, c)| {
+                    matches!(c, HardwareComponent::Motherboard(m)
+                            if m.socket().is_some_and(|s| cooler.is_compatible(s)))
+                });
+
+                if !has_compatible_mb && inv.count_items_for(HardwareKind::Motherboard) > 0 {
+                    let current_socket = inv
+                        .installed_motherboard()
+                        .and_then(super::model::hardware::Motherboard::socket)
+                        .map_or_else(|| "unknown".to_string(), |s| format!("{s}"));
+                    warnings.push(format!(
+                        "No compatible motherboard owned (your current: {current_socket})"
+                    ));
                 }
             }
             HardwareComponent::Motherboard(mb) => {
                 let new_socket = mb.socket();
                 let new_ram_type = mb.ram_type();
 
-                if let Some(cpu) = pc.cpu()
-                    && let Some(socket) = new_socket
-                    && socket != cpu.socket
-                {
-                    warnings.push(format!("Requires {} CPU (you have {})", socket, cpu.socket));
-                }
-                for ram in pc.rams() {
-                    if let Some(ram_type) = new_ram_type
-                        && ram_type != ram.ram_type
-                    {
+                // Check if ANY owned CPU is compatible
+                if let Some(socket) = new_socket {
+                    let has_compatible_cpu = inv.items_for(HardwareKind::Cpu).any(
+                        |(_, c)| matches!(c, HardwareComponent::Cpu(cpu) if cpu.socket == socket),
+                    );
+
+                    if !has_compatible_cpu && inv.count_items_for(HardwareKind::Cpu) > 0 {
+                        let current_cpu = inv
+                            .cpu()
+                            .map_or_else(|| "unknown".to_string(), |c| format!("{}", c.socket));
                         warnings.push(format!(
-                            "Requires {} RAM (you have {})",
-                            ram_type, ram.ram_type
+                            "No compatible CPU owned (needs {socket}, you have {current_cpu})"
                         ));
-                        break; // Only warn once
                     }
                 }
-                if let Some(cooler) = pc.cooler()
-                    && let Some(socket) = new_socket
-                    && !cooler.is_compatible(socket)
-                {
-                    warnings.push(format!("Your cooler doesn't support {socket} socket"));
+
+                // Check if ANY owned RAM is compatible
+                if let Some(ram_type) = new_ram_type {
+                    let has_compatible_ram = inv.items_for(HardwareKind::Ram).any(
+                        |(_, c)| matches!(c, HardwareComponent::Ram(r) if r.ram_type == ram_type),
+                    );
+
+                    if !has_compatible_ram && inv.count_items_for(HardwareKind::Ram) > 0 {
+                        let current_ram = inv
+                            .rams()
+                            .first()
+                            .map_or_else(|| "unknown".to_string(), |r| format!("{}", r.ram_type));
+                        warnings.push(format!(
+                            "No compatible RAM owned (needs {ram_type}, you have {current_ram})"
+                        ));
+                    }
+                }
+
+                // Check if ANY owned cooler is compatible
+                if let Some(socket) = new_socket {
+                    let has_compatible_cooler = inv
+                        .items_for(HardwareKind::Cooler)
+                        .any(|(_, c)| {
+                            matches!(c, HardwareComponent::Cooler(cooler) if cooler.is_compatible(socket))
+                        });
+
+                    if !has_compatible_cooler && inv.count_items_for(HardwareKind::Cooler) > 0 {
+                        warnings.push(format!("No owned cooler supports {socket} socket"));
+                    }
                 }
             }
             HardwareComponent::Ram(ram) => {
-                if let Some(mb) = &pc.motherboard
-                    && let Some(mb_ram_type) = mb.ram_type()
-                    && ram.ram_type != mb_ram_type
-                {
+                // Check if ANY owned motherboard supports this RAM type
+                let has_compatible_mb = inv
+                    .items_for(HardwareKind::Motherboard)
+                    .any(|(_, c)| {
+                        matches!(c, HardwareComponent::Motherboard(m) if m.ram_type() == Some(ram.ram_type))
+                    });
+
+                if !has_compatible_mb && inv.count_items_for(HardwareKind::Motherboard) > 0 {
+                    let current_ram_type = inv
+                        .installed_motherboard()
+                        .and_then(super::model::hardware::Motherboard::ram_type)
+                        .map_or_else(|| "unknown".to_string(), |r| format!("{r}"));
                     warnings.push(format!(
-                        "Requires {} motherboard (you have {})",
-                        ram.ram_type, mb_ram_type
+                        "No compatible motherboard owned (needs {}, you have {})",
+                        ram.ram_type, current_ram_type
                     ));
                 }
             }
@@ -149,6 +205,7 @@ impl Shop {
     }
 
     /// Check if a purchase should be blocked
+    /// Only blocks for insufficient credits or duplicate motherboards
     pub fn check_purchase_blocked(player: &Player, item: &HardwareComponent) -> Option<String> {
         let price = item.price();
 
@@ -160,29 +217,15 @@ impl Shop {
             ));
         }
 
-        // Block duplicate motherboard
+        // Block duplicate motherboard (same model)
         if let HardwareComponent::Motherboard(mb) = item
             && player.owns_motherboard(mb.id)
         {
             return Some(format!("Already own motherboard: {}", mb.name));
         }
 
-        // Block if no slots available for component type
-        if let Some(mb) = player.get_motherboard() {
-            let kind = item.kind();
-            if kind.is_slot_kind() {
-                let max_slots = mb.slot_count(kind);
-                let owned = player.count_owned_of(item);
-                if owned >= max_slots {
-                    return Some(format!(
-                        "No {} slots available (max: {})",
-                        kind.name(),
-                        max_slots
-                    ));
-                }
-            }
-        }
-
+        // Don't block based on slot availability - let users buy what they want
+        // Warnings will inform them about compatibility issues
         None
     }
 
@@ -199,7 +242,7 @@ impl Shop {
         let price = item.price();
 
         // Get warnings (informational only)
-        let warnings = Self::purchase_warnings(&player.pc, item);
+        let warnings = Self::purchase_warnings(&player.inventory, item);
 
         // Deduct credits
         player.credits -= price;
