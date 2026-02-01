@@ -41,7 +41,7 @@ pub fn render(f: &mut Frame, app: &App) {
     let controls = match app.shop_tab {
         ShopTab::Available => "Tab: Owned | ←/→: Category | ↑/↓: Select | Enter: Buy | Esc: Exit",
         ShopTab::Owned => {
-            "Tab: Shop | ←/→: Category | ↑/↓: Select | Enter: Install | Backspace: Uninstall | Esc: Exit"
+            "Tab: Shop | ←/→: Category | ↑/↓: Select | Enter: Install / Uninstall | Esc: Exit"
         }
     };
 
@@ -769,17 +769,6 @@ pub fn handle_key(key: KeyEvent, app: &mut App) -> KeyResult {
         }
         KeyCode::Enter => {
             handle_shop_enter(app);
-        }
-        KeyCode::Backspace if app.shop_tab == ShopTab::Owned => {
-            // Toggle install state of selected component using grouped display
-            let groups = app.player.inventory.grouped_display(app.shop_category);
-            if let Some(group) = groups.get(app.shop_selection) {
-                let abs_idx = group.first_index();
-                match app.player.toggle_install(abs_idx) {
-                    Ok(msg) => app.log(msg),
-                    Err(msg) => app.log(format!("Error: {msg}")),
-                }
-            }
         }
         _ => {}
     }

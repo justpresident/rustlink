@@ -10,7 +10,7 @@ impl Command for HelpCommand {
     }
 
     fn aliases(&self) -> &[&'static str] {
-        &["?"]
+        &[]
     }
 
     fn description(&self) -> &'static str {
@@ -65,8 +65,8 @@ impl Command for HelpKeysCommand {
         app.log("");
         app.log("Keyboard shortcuts:");
         app.log("  Tab              - Autocomplete");
-        app.log("  Up/Down          - log history");
-        app.log("  PageUp/PageDown  - command history");
+        app.log("  Up/Down          - Scroll Up/Down");
+        app.log("  PageUp/PageDown  - Command history");
         app.log("  Ctrl+A/E         - Start/End of line");
         app.log("  Ctrl+U           - Clear line");
         app.log("  Ctrl+W           - Delete word");

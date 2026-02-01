@@ -12,7 +12,13 @@ pub struct Terminal {
 impl Terminal {
     pub fn new() -> Self {
         Self {
-            logs: vec!["Uplink OS v0.0.1 - Hacker Edition".into()],
+            logs: vec![
+                "Uplink OS v0.0.1 - Hacker Edition".into(),
+                "Type `help` for available commands.".into(),
+                "Type `keys` for keyboard shortcuts.".into(),
+                "Use arrow keys to scroll up and down".into(),
+                "Use `Tab` key for autocompletion of commands and command parameters".into(),
+            ],
             ..Default::default()
         }
     }
